@@ -1,7 +1,7 @@
-"""Risks tab widget.
+"""Shared scored-entity tab (Risks / Opportunities).
 
-This module contains the Qt UI construction for the Risks tab.
-Behavior remains in MainWindow via injected callbacks.
+This centralizes the duplicate UI for scored entities (filters + table + editor).
+Behavior is still supplied by MainWindow via callbacks.
 """
 
 from __future__ import annotations
@@ -25,22 +25,27 @@ from PySide6.QtWidgets import (  # pylint: disable=no-name-in-module
     QHeaderView,
 )
 
-from riskapp_client.ui.widgets import CrispHeader, RiskForm, setup_readonly_table
+from riskapp_client.domain.scored_entity_fields import ALL_STATUSES
+from riskapp_client.services.entity_filters import ANY_STATUS
+from riskapp_client.ui.components.custom_gui_widgets import CrispHeader, RiskForm, setup_readonly_table
+
+MAX_SCORE_UI = 25
 
 
-class RisksTab(QWidget):
-    """Risks list + editor tab."""
+class ScoredEntitiesTab(QWidget):
+    """Generic list + editor tab for scored entities."""
 
     def __init__(
         self,
         *,
+        entity_label_singular: str,
         on_export_csv: Callable[[], None],
         on_refresh: Callable[[], None],
-        on_risk_clicked: Callable[[int, int], None],
-        on_new_risk: Callable[[], None],
-        on_save_risk: Callable[[dict], None],
+        on_item_clicked: Callable[[int, int], None],
+        on_new_item: Callable[[], None],
+        on_save_item: Callable[[dict], None],
         on_mark_dirty: Callable[..., None],
-        on_fit_table_card: Callable[[], None],
+        on_fit_table_card: Callable[[], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -54,18 +59,18 @@ class RisksTab(QWidget):
         self.filter_search.setPlaceholderText("Search title…")
 
         self.filter_min_score = QSpinBox()
-        self.filter_min_score.setRange(0, 25)
+        self.filter_min_score.setRange(0, MAX_SCORE_UI)
         self.filter_min_score.setValue(0)
 
         self.filter_max_score = QSpinBox()
-        self.filter_max_score.setRange(0, 25)
-        self.filter_max_score.setValue(25)
+        self.filter_max_score.setRange(0, MAX_SCORE_UI)
+        self.filter_max_score.setValue(MAX_SCORE_UI)
 
         self.filter_report = QLabel("")
         self.filter_report.setTextFormat(Qt.RichText)
 
         self.filter_status = QComboBox()
-        self.filter_status.addItems(["(any)", "concept", "active", "closed", "deleted", "happened"])
+        self.filter_status.addItems([ANY_STATUS, *ALL_STATUSES])
 
         self.filter_category = QLineEdit()
         self.filter_category.setPlaceholderText("Category…")
@@ -86,14 +91,11 @@ class RisksTab(QWidget):
         clear_btn.clicked.connect(self.clear_filters)
 
         # refresh on any change
-        self.filter_search.textChanged.connect(lambda *_: self._on_refresh())
-        self.filter_min_score.valueChanged.connect(lambda *_: self._on_refresh())
-        self.filter_max_score.valueChanged.connect(lambda *_: self._on_refresh())
+        for w in (self.filter_search, self.filter_category, self.filter_owner, self.filter_from, self.filter_to):
+            w.textChanged.connect(lambda *_: self._on_refresh())
+        for w in (self.filter_min_score, self.filter_max_score):
+            w.valueChanged.connect(lambda *_: self._on_refresh())
         self.filter_status.currentTextChanged.connect(lambda *_: self._on_refresh())
-        self.filter_category.textChanged.connect(lambda *_: self._on_refresh())
-        self.filter_owner.textChanged.connect(lambda *_: self._on_refresh())
-        self.filter_from.textChanged.connect(lambda *_: self._on_refresh())
-        self.filter_to.textChanged.connect(lambda *_: self._on_refresh())
 
         filters_row = QHBoxLayout()
         filters_row.addWidget(QLabel("Search"))
@@ -119,42 +121,43 @@ class RisksTab(QWidget):
 
         layout.addLayout(filters_row)
 
-        self.risks_table = QTableWidget(0, 8)
-        self.risks_table.setHorizontalHeaderLabels(
+        # ---- Table ----
+        self.table = QTableWidget(0, 8)
+        self.table.setHorizontalHeaderLabels(
             ["Code", "Title", "Category", "Status", "Owner", "P", "I", "Score"]
         )
-        for col in range(self.risks_table.columnCount()):
-            item = self.risks_table.horizontalHeaderItem(col)
+        for col in range(self.table.columnCount()):
+            item = self.table.horizontalHeaderItem(col)
             if item:
                 item.setTextAlignment(Qt.AlignCenter)
 
-        self.risks_table.cellClicked.connect(on_risk_clicked)
+        self.table.cellClicked.connect(on_item_clicked)
 
-        setup_readonly_table(self.risks_table, excel_delegate=True)
-        self.risks_table.setMouseTracking(True)
-        self.risks_table.viewport().setMouseTracking(True)
+        setup_readonly_table(self.table, excel_delegate=True)
+        self.table.setMouseTracking(True)
+        self.table.viewport().setMouseTracking(True)
 
-        self.risks_table.setFrameShape(QFrame.Box)
-        self.risks_table.setFrameShadow(QFrame.Plain)
-        self.risks_table.setLineWidth(0)
-        self.risks_table.setMidLineWidth(0)
+        self.table.setFrameShape(QFrame.Box)
+        self.table.setFrameShadow(QFrame.Plain)
+        self.table.setLineWidth(0)
+        self.table.setMidLineWidth(0)
 
-        self.risks_table.setHorizontalHeader(
-            CrispHeader(Qt.Horizontal, self.risks_table, line_color="#d0d0d0")
+        self.table.setHorizontalHeader(
+            CrispHeader(Qt.Horizontal, self.table, line_color="#d0d0d0")
         )
 
-        hh = self.risks_table.horizontalHeader()
+        hh = self.table.horizontalHeader()
         hh.setSectionsClickable(False)
         hh.setHighlightSections(False)
         hh.setStretchLastSection(False)
         hh.setSectionResizeMode(QHeaderView.Interactive)
         hh.setDefaultAlignment(Qt.AlignCenter)
 
-        self.risks_table.verticalHeader().setVisible(False)
-        self.risks_table.setCornerButtonEnabled(False)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setCornerButtonEnabled(False)
 
-        self.risks_table.setShowGrid(False)
-        self.risks_table.setStyleSheet(
+        self.table.setShowGrid(False)
+        self.table.setStyleSheet(
             """
             QTableWidget {
                 border: 1px solid #d0d0d0;
@@ -165,18 +168,18 @@ class RisksTab(QWidget):
             }
             """
         )
-        # delegate is set by setup_readonly_table(...)
 
         self.table_card = QFrame()
         self.table_card.setObjectName("table_card")
         self.table_card.setAttribute(Qt.WA_StyledBackground, True)
 
-        hh.sectionResized.connect(lambda *_: on_fit_table_card())
+        if on_fit_table_card:
+            hh.sectionResized.connect(lambda *_: on_fit_table_card())
 
         card_layout = QHBoxLayout(self.table_card)
         card_layout.setContentsMargins(16, 12, 12, 12)
         card_layout.setSpacing(0)
-        card_layout.addWidget(self.risks_table, 0, Qt.AlignLeft | Qt.AlignTop)
+        card_layout.addWidget(self.table, 0, Qt.AlignLeft | Qt.AlignTop)
         card_layout.addStretch(1)
 
         self.table_card.setStyleSheet(
@@ -190,19 +193,19 @@ class RisksTab(QWidget):
         )
         self.table_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # Editor widgets
-        self.editor_label = QLabel("Editor (new risk)")
-        self.risk_form = RiskForm(on_save_risk)
-        self.new_risk_btn = QPushButton("New risk")
-        self.new_risk_btn.clicked.connect(on_new_risk)
+        # ---- Editor ----
+        self.editor_label = QLabel(f"Editor (new {entity_label_singular})")
+        self.form = RiskForm(on_save_item)
+        self.new_btn = QPushButton(f"New {entity_label_singular}")
+        self.new_btn.clicked.connect(on_new_item)
 
         # dirty tracking hooks
-        self.risk_form.title.textEdited.connect(on_mark_dirty)
-        self.risk_form.p.valueChanged.connect(on_mark_dirty)
-        self.risk_form.impact_cost.valueChanged.connect(on_mark_dirty)
-        self.risk_form.impact_time.valueChanged.connect(on_mark_dirty)
-        self.risk_form.impact_scope.valueChanged.connect(on_mark_dirty)
-        self.risk_form.impact_quality.valueChanged.connect(on_mark_dirty)
+        self.form.title.textEdited.connect(on_mark_dirty)
+        self.form.p.valueChanged.connect(on_mark_dirty)
+        self.form.impact_cost.valueChanged.connect(on_mark_dirty)
+        self.form.impact_time.valueChanged.connect(on_mark_dirty)
+        self.form.impact_scope.valueChanged.connect(on_mark_dirty)
+        self.form.impact_quality.valueChanged.connect(on_mark_dirty)
 
         self.editor_card = QFrame()
         self.editor_card.setObjectName("editor_card")
@@ -224,10 +227,10 @@ class RisksTab(QWidget):
         hdr = QHBoxLayout()
         hdr.addWidget(self.editor_label)
         hdr.addStretch(1)
-        hdr.addWidget(self.new_risk_btn)
+        hdr.addWidget(self.new_btn)
 
         editor_layout.addLayout(hdr)
-        editor_layout.addWidget(self.risk_form)
+        editor_layout.addWidget(self.form)
         self.editor_card.setFixedHeight(self.editor_card.sizeHint().height())
 
         split = QSplitter(Qt.Vertical)
@@ -258,7 +261,7 @@ class RisksTab(QWidget):
         """Reset all filter widgets to defaults."""
         self.filter_search.setText("")
         self.filter_min_score.setValue(0)
-        self.filter_max_score.setValue(25)
+        self.filter_max_score.setValue(self.filter_max_score.maximum())
         self.filter_status.setCurrentIndex(0)
         self.filter_category.setText("")
         self.filter_owner.setText("")

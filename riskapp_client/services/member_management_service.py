@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from riskapp_client.domain.models import Member
+from riskapp_client.domain.domain_models import Member
 
 
 class MembersService:

@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from riskapp_client.domain.models import Opportunity, Risk
-from riskapp_client.services.scored_fields import SCORED_ENTITY_CSV_COLUMNS
+from riskapp_client.domain.domain_models import Opportunity, Risk
+from riskapp_client.domain.scored_entity_fields import SCORED_ENTITY_CSV_COLUMNS
 
 _DANGEROUS_PREFIXES = ("=", "+", "-", "@")
 

@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from riskapp_client.adapters.local.outbox import OutboxStore
-from riskapp_client.adapters.local.sqlite_store import LocalStore
-from riskapp_client.domain.models import (
+from riskapp_client.adapters.local_storage.sync_outbox_queue import OutboxStore
+from riskapp_client.adapters.local_storage.sqlite_data_store import LocalStore
+from riskapp_client.domain.domain_models import (
     Action,
     Assessment,
     Backend,
@@ -24,12 +24,11 @@ from riskapp_client.domain.models import (
     Project,
     Risk,
 )
-from riskapp_client.services.action_service import ActionService
-from riskapp_client.services.assessment_service import AssessmentService
-from riskapp_client.services.members_service import MembersService
-from riskapp_client.services.opportunity_service import OpportunityService
-from riskapp_client.services.risk_service import RiskService
-from riskapp_client.services.sync_service import SyncService
+from riskapp_client.services.action_management_service import ActionService
+from riskapp_client.services.assessment_management_service import AssessmentService
+from riskapp_client.services.member_management_service import MembersService
+from riskapp_client.services.scored_entity_management_service import ScoredEntityService, ScoredEntityWiring
+from riskapp_client.services.synchronization_service import SyncService
 
 
 class OfflineFirstBackend(Backend):
@@ -39,9 +38,32 @@ class OfflineFirstBackend(Backend):
         self.store = store
         self.remote = remote
         self.outbox = OutboxStore(store)
-
-        self._risks = RiskService(store, self.outbox)
-        self._opps = OpportunityService(store, self.outbox)
+        self._risks = ScoredEntityService(
+            ScoredEntityWiring(
+                kind="risk",
+                id_kw="risk_id",
+                model_cls=Risk,
+                list_fn=store.list_risks,
+                get_project_and_version_fn=store.get_risk_project_and_version,
+                get_row_fn=store.get_risk_row,
+                upsert_local_fn=store.upsert_local_risk,
+                queue_upsert_fn=self.outbox.queue_risk_upsert,
+                next_code_fn=store.next_risk_code,
+            )
+        )
+        self._opps = ScoredEntityService(
+            ScoredEntityWiring(
+                kind="opportunity",
+                id_kw="opportunity_id",
+                model_cls=Opportunity,
+                list_fn=store.list_opportunities,
+                get_project_and_version_fn=store.get_opportunity_project_and_version,
+                get_row_fn=store.get_opportunity_row,
+                upsert_local_fn=store.upsert_local_opportunity,
+                queue_upsert_fn=self.outbox.queue_opportunity_upsert,
+                next_code_fn=store.next_opportunity_code,
+            )
+        )
         self._actions = ActionService(store, self.outbox)
         self._assessments = AssessmentService(store, self.outbox)
         self._members = MembersService(remote)
@@ -124,51 +146,11 @@ class OfflineFirstBackend(Backend):
     def list_actions(self, project_id: str) -> list[Action]:
         return self._actions.list(project_id)
 
-    def create_action(
-        self,
-        project_id: str,
-        *,
-        target_type: str,
-        target_id: str,
-        kind: str,
-        title: str,
-        description: str,
-        status: str,
-        owner_user_id: str | None,
-    ) -> Action:
-        return self._actions.create(
-            project_id,
-            target_type=target_type,
-            target_id=target_id,
-            kind=kind,
-            title=title,
-            description=description,
-            status=status,
-            owner_user_id=owner_user_id,
-        )
+    def create_action(self, project_id: str, **kwargs: Any) -> Action:
+        return self._actions.create(project_id, **kwargs)
 
-    def update_action(
-        self,
-        action_id: str,
-        *,
-        target_type: str,
-        target_id: str,
-        kind: str,
-        title: str,
-        description: str,
-        status: str,
-        owner_user_id: str | None,
-    ) -> Action:
-        return self._actions.update(
-            action_id,
-            target_type=target_type,
-            target_id=target_id,
-            kind=kind,
-            title=title,
-            description=description,
-            status=status,
-            owner_user_id=owner_user_id,
-        )
+    def update_action(self, action_id: str, **kwargs: Any) -> Action:
+        return self._actions.update(action_id, **kwargs)
 
     # ---- Assessments ----
 

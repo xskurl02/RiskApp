@@ -1,14 +1,26 @@
 """Shared field definitions for scored entities (Risk, Opportunity).
 
 Put this file next to `models.py` (i.e., in the same package as
-`riskapp_client.domain.models`) so it can be imported as:
+`riskapp_client.domain.domain_models`) so it can be imported as:
 
-    from riskapp_client.domain.scored_fields import ...
+    from riskapp_client.domain.scored_entity_fields import ...
 """
 
 from __future__ import annotations
 
 from typing import Final
+
+# Entity lifecycle statuses
+DEFAULT_STATUS: Final[str] = "concept"
+ALL_STATUSES: Final[tuple[str, ...]] = (
+    "concept", 
+    "active", 
+    "closed", 
+    "deleted", 
+    "happened"
+)
+
+ACTION_DEFAULT_STATUS: Final[str] = "open"
 
 
 # Canonical list of optional/meta fields shared by Risk + Opportunity.
@@ -32,6 +44,29 @@ SCORED_ENTITY_META_KEYS: Final[tuple[str, ...]] = (
     "impact_quality",
 )
 
+# Base keys shared by Risk + Opportunity across API/SQLite/UI payloads.
+SCORED_ENTITY_BASE_KEYS: Final[tuple[str, ...]] = (
+    "id",
+    "project_id",
+    "title",
+    "probability",
+    "impact",
+)
+
+# Sync metadata keys commonly present in API/SQLite.
+SCORED_ENTITY_SYNC_KEYS: Final[tuple[str, ...]] = (
+    "version",
+    "is_deleted",
+    "updated_at",
+)
+
+# Canonical column list for reading scored entities from SQLite.
+# (SQLite does not persist `score`; it is computed client-side when absent.)
+SCORED_ENTITY_DB_COLUMNS: Final[tuple[str, ...]] = (
+    *SCORED_ENTITY_BASE_KEYS,
+    *SCORED_ENTITY_META_KEYS,
+    *SCORED_ENTITY_SYNC_KEYS,
+)
 
 # SQLite column definitions for schema upgrades (order matters for stable diffs).
 SCORED_ENTITY_META_SQLITE_COLUMNS: Final[tuple[tuple[str, str], ...]] = (

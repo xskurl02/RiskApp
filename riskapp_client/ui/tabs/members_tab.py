@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (  # pylint: disable=no-name-in-module
     QWidget,
 )
 
-from riskapp_client.ui.widgets import setup_readonly_table
+from riskapp_client.ui.components.custom_gui_widgets import setup_readonly_table
 
 
 class MembersTab(QWidget):

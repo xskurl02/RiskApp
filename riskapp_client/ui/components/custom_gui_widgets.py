@@ -72,16 +72,6 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
             return QSize(s.width() + self.GUTTER_W + 10, s.height())
         return s
 
-    def setup_readonly_table(table: QTableWidget, *, excel_delegate: bool = False) -> None:
-        """Apply the standard readonly 'list table' behavior used across tabs."""
-        table.verticalHeader().setVisible(False)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.setSelectionMode(QAbstractItemView.SingleSelection)
-        table.setFocusPolicy(Qt.StrongFocus)
-        if excel_delegate:
-            table.setItemDelegate(ExcelSelectionDelegate(table))
-
     def paint(self, painter, option, index):
         opt = QStyleOptionViewItem(option)
 
@@ -139,12 +129,12 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
             super().paint(painter, opt, index)
 
         # active cell border
-        if option.state & QStyle.State_HasFocus:
+        if opt.state & QStyle.State_HasFocus:
             painter.save()
-            pen = QPen(option.palette.highlight().color(), 2)
+            pen = QPen(opt.palette.highlight().color(), 2)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
-            painter.drawRect(option.rect.adjusted(1, 1, -1, -1))
+            painter.drawRect(opt.rect.adjusted(1, 1, -1, -1))
             painter.restore()
 
         # excel-like internal gridlines
@@ -171,6 +161,18 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
 
         painter.restore()
 
+def setup_readonly_table(table: QTableWidget, *, excel_delegate: bool = False) -> None:
+    """Apply standard readonly 'list table' behavior used across tabs.
+
+    Call-sites import this from ``riskapp_client.ui.components.custom_gui_widgets``.
+    """
+    table.verticalHeader().setVisible(False)
+    table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+    table.setSelectionBehavior(QAbstractItemView.SelectRows)
+    table.setSelectionMode(QAbstractItemView.SingleSelection)
+    table.setFocusPolicy(Qt.StrongFocus)
+    if excel_delegate:
+        table.setItemDelegate(ExcelSelectionDelegate(table))
 
 class RiskForm(QWidget):
     """
@@ -513,3 +515,4 @@ class CrispHeader(QHeaderView):
             x = rect.right()
             painter.drawLine(x, rect.top(), x, rect.bottom())
         painter.restore()
+

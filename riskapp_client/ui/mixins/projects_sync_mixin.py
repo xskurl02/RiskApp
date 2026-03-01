@@ -13,23 +13,15 @@ class ProjectsSyncMixin:
     def _refresh_all_views(self, *, select_risk_id: str | None = None) -> None:
         """Refresh all project-scoped tabs from the backend/local store."""
         self._refresh_risks(select_risk_id=select_risk_id)
-        self._refresh_action_risk_combo()
-        self._refresh_actions()
-        self._maybe_expand_title_column()
-        self._refresh_matrix()
-        self._refresh_top_history()
-        self._refresh_assessments()
-        self._refresh_opportunities()
-        self._refresh_action_opp_combo()
-        self._refresh_members()
-        self._update_sync_status()
+        for fn in (self._refresh_action_risk_combo, self._refresh_actions, self._maybe_expand_title_column,
+                   self._refresh_matrix, self._refresh_top_history, self._refresh_assessments,
+                   self._refresh_opportunities, self._refresh_action_opp_combo, self._refresh_members, self._update_sync_status):
+            fn()
 
     def _load_projects(self) -> None:
         self.project_list.clear()
-        try:
-            projects = self.backend.list_projects()
-        except Exception as e:
-            QMessageBox.critical(self, "Backend error", str(e))
+        projects = self._call_backend("Backend error", self.backend.list_projects)
+        if projects is None:
             return
 
         for p in projects:
@@ -89,11 +81,8 @@ class ProjectsSyncMixin:
         if not hasattr(self.backend, "sync_project"):
             QMessageBox.information(self, "Sync", "This backend does not support sync.")
             return
-
-        try:
-            summary = self.backend.sync_project(pid)  # type: ignore[attr-defined]
-        except Exception as e:
-            QMessageBox.critical(self, "Sync failed", str(e))
+        summary = self._call_backend("Sync failed", self.backend.sync_project, pid)  # type: ignore[attr-defined]
+        if summary is None:
             self._update_sync_status()
             return
 

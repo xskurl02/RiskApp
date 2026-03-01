@@ -5,85 +5,18 @@ Filtering, table rendering, editor behavior, column sizing, and CSV export for r
 from __future__ import annotations
 
 from datetime import datetime
-from collections import Counter
 
 from PySide6.QtCore import Qt  # pylint: disable=no-name-in-module
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem  # pylint: disable=no-name-in-module
+from PySide6.QtWidgets import QFileDialog, QMessageBox  # pylint: disable=no-name-in-module
 
-from riskapp_client.domain.models import Risk
+from riskapp_client.domain.domain_models import Risk
 from riskapp_client.services import export_csv, filters
+from riskapp_client.ui.mixins.scored_entity_mixin import ScoredEntityMixin
 
-class RisksMixin:
+class RisksMixin(ScoredEntityMixin):
     """MainWindow mixin: RisksMixin"""
     def _export_risks_csv(self) -> None:
-        if not self.current_project_id:
-            return
-        path, _ = QFileDialog.getSaveFileName(self, "Export risks CSV", "risks.csv", "CSV Files (*.csv)")
-        if not path:
-            return
-        
-        rows = list(self._risk_cache.values())
-        rows.sort(key=lambda r: (r.score, r.title), reverse=True)
-        export_csv.export_risks(path, rows)
-
-    def _mk_item(
-        self,
-        text: str,
-        *,
-        entity_id: str | None = None,
-        align_center: bool = False,
-    ) -> QTableWidgetItem:
-        """Create a table item with optional entity-id in Qt.UserRole."""
-        item = QTableWidgetItem(text)
-        if entity_id is not None:
-            item.setData(Qt.UserRole, entity_id)
-        if align_center:
-            item.setTextAlignment(Qt.AlignCenter)
-        return item
-
-
-    def _select_row_by_entity_id(self, entity_id: str | None) -> None:
-        """Select the row in risks_table whose column-0 Qt.UserRole matches entity_id."""
-        if not entity_id:
-            return
-        target = str(entity_id)
-
-        for row in range(self.risks_table.rowCount()):
-            it = self.risks_table.item(row, 0)
-            if it and str(it.data(Qt.UserRole)) == target:
-                self.risks_table.selectRow(row)
-                self.risks_table.setCurrentCell(row, 0)
-                return
-
-
-    def _update_risk_filter_report(self, full: list[Risk], filtered: list[Risk]) -> None:
-        """Render the filter report label based on the displayed subset."""
-        if not filtered:
-            self.filter_report.setText(f"Showing 0/{len(full)}")
-            return
-
-        scores = [r.score for r in filtered]
-        avg = sum(scores) / len(scores)
-
-        status_counts = Counter((r.status or "concept") for r in filtered)
-        order = ["active", "concept", "closed", "happened", "deleted"]
-        status_bits = [f"{st} {status_counts[st]}" for st in order if status_counts.get(st)]
-        for st, n in status_counts.most_common():
-            if st not in order:
-                status_bits.append(f"{st} {n}")
-
-        cat_counts = Counter((r.category or "(none)") for r in filtered)
-        top_cats = [f"{c} {n}" for c, n in cat_counts.most_common(3) if c and c != "(none)"]
-
-        lines = [
-            f"Showing {len(filtered)}/{len(full)} · score min {min(scores)} · max {max(scores)} · avg {avg:.1f}",
-            f"Status: {', '.join(status_bits) if status_bits else '(none)'}",
-        ]
-        if top_cats:
-            lines.append(f"Top categories: {', '.join(top_cats)}")
-
-        self.filter_report.setText("<br>".join(lines))
-
+        self._export_entity_csv("risks.csv", self._risk_cache, export_csv.export_risks)
 
     def _ensure_risks_column_widths(self, pid: str) -> None:
         """Restore cached per-project column widths or autosize once per project switch."""
@@ -105,32 +38,29 @@ class RisksMixin:
         pid = self.current_project_id
         if not pid:
             return
-
-        try:
-            full = self.backend.list_risks(pid)
-        except Exception as exc:
-            QMessageBox.critical(self, "Backend error", str(exc))
-            return
-
-        filtered = self._apply_risk_filters(full)
-
-        self._update_risk_filter_report(full, filtered)
-        self._risk_cache = {r.id: r for r in filtered}
-
-        # Populate table
-        self.risks_table.setRowCount(len(filtered))
-        for row, r in enumerate(filtered):
-            self.risks_table.setItem(row, 0, self._mk_item(r.code or "", entity_id=r.id))
-            self.risks_table.setItem(row, 1, self._mk_item(r.title, entity_id=r.id))
-            self.risks_table.setItem(row, 2, self._mk_item(r.category or ""))
-            self.risks_table.setItem(row, 3, self._mk_item(r.status or ""))
-            self.risks_table.setItem(row, 4, self._mk_item(r.owner_user_id or ""))
-            self.risks_table.setItem(row, 5, self._mk_item(str(r.probability), align_center=True))
-            self.risks_table.setItem(row, 6, self._mk_item(str(r.impact), align_center=True))
-            self.risks_table.setItem(row, 7, self._mk_item(str(r.score), align_center=True))
-
-        self._select_row_by_entity_id(select_risk_id)
-
+        filters_dict = {
+            "min_score": self.filter_min_score, 
+            "max_score": self.filter_max_score, 
+            "search": self.filter_search,
+            "status": self.filter_status, 
+            "category": self.filter_category, 
+            "owner": self.filter_owner,
+            "from_date": self.filter_from, 
+            "to_date": self.filter_to
+        }
+        res = self._refresh_entity(
+            pid,
+            self.backend.list_risks,
+            filters.filter_risks,
+            filters.RiskFilterCriteria,
+            self.filter_report,
+            self.risks_table,
+            filters_dict,
+            self._mk_item,
+            select_risk_id
+        )
+        if res is not None: 
+            self._risk_cache = res
         # Column sizing / per-project caching and final card fit
         self._ensure_risks_column_widths(pid)
         self._fit_table_card()
@@ -141,29 +71,6 @@ class RisksMixin:
         for c in range(self.risks_table.columnCount()):
             w = max(self.risks_table.columnWidth(c), hh.sectionSizeHint(c))
             self.risks_table.setColumnWidth(c, w)
-
-    def _apply_risk_filters(self, risks: list[Risk]) -> list[Risk]:
-        mn = int(self.filter_min_score.value())
-        mx = int(self.filter_max_score.value())
-        if mn > mx:
-            mn, mx = mx, mn
-
-        dt_from = filters.parse_date(self.filter_from.text())
-        dt_to = filters.parse_date(self.filter_to.text())
-        if dt_to:
-            dt_to = dt_to.replace(hour=23, minute=59, second=59)
-
-        criteria = filters.RiskFilterCriteria(
-            search=(self.filter_search.text() or ""),
-            min_score=mn,
-            max_score=mx,
-            status=(self.filter_status.currentText() or "(any)"),
-            category_contains=(self.filter_category.text() or ""),
-            owner_contains=(self.filter_owner.text() or ""),
-            identified_from=dt_from,
-            identified_to=dt_to,
-        )
-        return filters.filter_risks(risks, criteria)
 
     def _maybe_expand_title_column(self) -> None:
         pid = self.current_project_id
@@ -184,56 +91,22 @@ class RisksMixin:
         self._fit_table_card()
 
     def _on_risk_clicked(self, row: int, col: int) -> None:
-        t_it = self.risks_table.item(row, 1)
-        if not t_it:
-            return
-
-        clicked_rid = t_it.data(Qt.UserRole)
-        if not clicked_rid:
-            return
-        clicked_rid = str(clicked_rid)
-
-        if self._editor_dirty and self.current_risk_id and self.current_risk_id != clicked_rid:
-            self._commit_editor_changes(refresh=True, select_risk_id=clicked_rid)
-            row = self.risks_table.currentRow()
-            col = self.risks_table.currentColumn() if self.risks_table.currentColumn() >= 0 else 0
-
-        self.risks_table.setCurrentCell(row, col)
-
-        pid = self.current_project_id
-        if not pid:
-            return
-
-        r = self._risk_cache.get(clicked_rid)
-        if not r:
-            return
-
-        self.current_risk_id = r.id
-        self.editor_label.setText(f"Editor (editing: {r.title})")
-        self.risk_form.set_values(
-            title=r.title,
-            probability=r.probability,
-            impact=r.impact,
-            code=r.code,
-            description=r.description,
-            category=r.category,
-            threat=r.threat,
-            triggers=r.triggers,
-            mitigation_plan=getattr(r, "mitigation_plan", None),
-            document_url=getattr(r, "document_url", None),
-            owner_user_id=r.owner_user_id,
-            status=r.status,
-            identified_at=r.identified_at,
-            status_changed_at=r.status_changed_at,
-            response_at=r.response_at,
-            occurred_at=r.occurred_at,
-            impact_cost=getattr(r, "impact_cost", None),
-            impact_time=getattr(r, "impact_time", None),
-            impact_scope=getattr(r, "impact_scope", None),
-            impact_quality=getattr(r, "impact_quality", None),
+        new_id = self._on_entity_clicked(
+            row,
+            col,
+            self.risks_table,
+            self._risk_cache,
+            self.current_risk_id,
+            self._editor_dirty, 
+            self._commit_editor_changes, 
+            self.risk_form, 
+            self.editor_label, 
+            "Editor"
         )
-        self._editor_dirty = False
-        self._refresh_assessments()
+        if new_id:
+            self.current_risk_id = new_id
+            self._editor_dirty = False
+            self._refresh_assessments()
 
     def _fit_table_card(self, max_height: int = 260) -> None:
         if not hasattr(self, "_table_card"):
@@ -275,47 +148,19 @@ class RisksMixin:
         self._editor_dirty = True
 
     def _commit_editor_changes(self, *, refresh: bool, select_risk_id: str | None = None) -> None:
-        if not self._editor_dirty:
-            return
-        if not self.current_risk_id:
-            return
-
-        #title = self.risk_form.title.text().strip()
-        #if not title:
-        #    return
-
-        #p = int(self.risk_form.p.value())
-        #i = int(self.risk_form.i.value())
-
-        payload = self.risk_form.get_payload()
-        if not payload.get("title"):
-            return
-        
-        #title = payload["title"]
-        #p = int(payload["probability"])
-        #i = int(payload["impact"])
-
-        try:
-            #self.backend.update_risk(self.current_risk_id, title=title, probability=p, impact=i, **payload)
-            # payload already contains title/probability/impact
-            self.backend.update_risk(self.current_risk_id, **payload)
-        except Exception as e:
-            QMessageBox.critical(self, "Backend error", str(e))
-            return
-
-        self._editor_dirty = False
-
-        if refresh:
-            self._refresh_risks(select_risk_id=select_risk_id or self.current_risk_id)
+        def ref_cb(select_id):
+            self._refresh_risks(select_id)
             self._refresh_matrix()
             self._maybe_expand_title_column()
+        if self._commit_entity_editor_changes(self.current_risk_id, self._editor_dirty, self.risk_form, self.backend.update_risk, ref_cb if refresh else None, select_risk_id):
+            self._editor_dirty = False
+
 
     def _start_new_risk(self) -> None:
         self._commit_editor_changes(refresh=True)
 
         self.current_risk_id = None
         self.editor_label.setText("Editor (new risk)")
-        #self.risk_form.set_values("", 3, 3)
         self.risk_form.set_values(title="", probability=3, impact=3)
         self._editor_dirty = False
 
@@ -323,58 +168,7 @@ class RisksMixin:
         self.risks_table.setCurrentItem(None)
 
     def _save_risk(self, payload: dict) -> None:
-        pid = self.current_project_id
-        if not pid:
-            QMessageBox.warning(self, "No project", "Select a project first.")
-            return
-
-        # Make a local copy and split core fields from metadata to avoid duplicate kwargs
-        data = dict(payload or {})
-        title = (data.pop("title", "") or "").strip()
-        p = int(data.pop("probability", 3) or 3)
-        i = int(data.pop("impact", 3) or 3)
-        
-        # Normalize empty strings to None for optional fields
-        for k in [
-            "code", "description", "category", "threat", "triggers",
-            "mitigation_plan", "document_url", "owner_user_id", "status",
-            "identified_at", "status_changed_at", "response_at", "occurred_at",
-        ]:
-            if k in data and isinstance(data[k], str) and not data[k].strip():
-                data[k] = None
-
-        if self.current_risk_id:
-            rid = self.current_risk_id
-            prev = self._risk_cache.get(rid)
-            prev_status = (prev.status or "") if prev else ""
-            new_status = (data.get("status") or "")
-            if new_status and new_status != prev_status:
-                data["status_changed_at"] = datetime.utcnow().isoformat()
-            try:
-                # UPDATE (do not create a new row)
-                self.backend.update_risk(rid, title=title, probability=p, impact=i, **data)
-            except Exception as e:
-                QMessageBox.critical(self, "Backend error", str(e))
-                return
-
+        extra = [self._refresh_action_risk_combo, self._refresh_actions, self._refresh_matrix]
+        if self._save_entity(payload, self.current_risk_id, self.backend.update_risk, self.backend.create_risk, self._refresh_risks, self.risk_form, self.editor_label, "Editor", extra):
             self._editor_dirty = False
-            self._refresh_risks(select_risk_id=rid)
-            self.editor_label.setText(f"Editor (editing: {title})")
-
-        else:
-            # default identified_at for new item if empty
-            if not data.get("identified_at"):
-                data["identified_at"] = datetime.utcnow().isoformat()
-            try:
-                r = self.backend.create_risk(pid, title=title, probability=p, impact=i, **data)
-            except Exception as e:
-                QMessageBox.critical(self, "Backend error", str(e))
-                return
-
-            self._editor_dirty = False
-            self._refresh_risks(select_risk_id=r.id)
-            self.current_risk_id = None
-            self.editor_label.setText("Editor (new risk)")
-            self.risk_form.set_values()
-
-        self._refresh_matrix()
+            if not self.current_risk_id: self.current_risk_id = None        

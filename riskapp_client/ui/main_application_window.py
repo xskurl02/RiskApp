@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QMainWindow  # pylint: disable=no-name-in-module
 
-from riskapp_client.domain.models import Backend
+from riskapp_client.domain.domain_models import Backend
 
 from riskapp_client.ui.mixins.actions_mixin import ActionsMixin
 from riskapp_client.ui.mixins.assessments_mixin import AssessmentsMixin
-from riskapp_client.ui.mixins.core_mixin import CoreMixin
+from riskapp_client.ui.mixins.global_state_mixin import CoreMixin
 from riskapp_client.ui.mixins.layout_mixin import LayoutMixin
 from riskapp_client.ui.mixins.matrix_mixin import MatrixMixin
 from riskapp_client.ui.mixins.members_mixin import MembersMixin

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol
+from riskapp_client.domain.scored_entity_fields import DEFAULT_STATUS, ACTION_DEFAULT_STATUS
 
 @dataclass
 class Member:
@@ -27,7 +28,7 @@ class Action:
     kind: str          # mitigation|contingency|exploit
     title: str
     description: str = ""
-    status: str = "open"   # open|doing|done
+    status: str = ACTION_DEFAULT_STATUS
     owner_user_id: str | None = None
 
     # sync metadata
@@ -36,54 +37,11 @@ class Action:
     updated_at: str = ""
 
 @dataclass
-class Risk:
+class ScoredEntity:
     id: str
     project_id: str
 
     # Required / assignment fields
-    code: str | None = None           # "Označení"
-    title: str = ""                   # "Název"
-    description: str | None = None    # "Popis"
-    category: str | None = None       # "Kategorie"
-    threat: str | None = None         # "Hrozba"
-    triggers: str | None = None       # "Spouštěče"
-    mitigation_plan: str | None = None
-    document_url: str | None = None
-    owner_user_id: str | None = None  # "Vlastník"
-    status: str | None = "concept"    # "Stav"
-
-    identified_at: str | None = None
-    status_changed_at: str | None = None
-    response_at: str | None = None
-    occurred_at: str | None = None
-
-    # Qualitative analysis fields
-    probability: int = 3
-    impact: int = 3  # overall
-    impact_cost: int | None = None
-    impact_time: int | None = None
-    impact_scope: int | None = None
-    impact_quality: int | None = None
-
-    # sync metadata
-    version: int = 0
-    is_deleted: bool = False
-    updated_at: str = ""
-
-    score: int = field(init=False)
-
-    def __post_init__(self) -> None:
-        dims = [self.impact_cost, self.impact_time, self.impact_scope, self.impact_quality]
-        dims = [int(x) for x in dims if x is not None]
-        if dims:
-            self.impact = max(dims)
-        self.score = int(self.probability) * int(self.impact)
-
-@dataclass
-class Opportunity:
-    id: str
-    project_id: str
-
     code: str | None = None
     title: str = ""
     description: str | None = None
@@ -92,9 +50,8 @@ class Opportunity:
     triggers: str | None = None
     mitigation_plan: str | None = None
     document_url: str | None = None
-
     owner_user_id: str | None = None
-    status: str | None = "concept"
+    status: str | None = DEFAULT_STATUS
 
     identified_at: str | None = None
     status_changed_at: str | None = None
@@ -108,6 +65,7 @@ class Opportunity:
     impact_scope: int | None = None
     impact_quality: int | None = None
 
+    # sync metadata
     version: int = 0
     is_deleted: bool = False
     updated_at: str = ""
@@ -120,6 +78,15 @@ class Opportunity:
         if dims:
             self.impact = max(dims)
         self.score = int(self.probability) * int(self.impact)
+
+@dataclass
+class Risk(ScoredEntity):
+    pass
+
+@dataclass
+class Opportunity(ScoredEntity):
+    pass
+
 
 
 @dataclass

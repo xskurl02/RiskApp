@@ -6,44 +6,37 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import Qt, QDateTime  # pylint: disable=no-name-in-module
-from PySide6.QtWidgets import QMessageBox, QTableWidgetItem  # pylint: disable=no-name-in-module
+from PySide6.QtCore import QDateTime  # pylint: disable=no-name-in-module
+from PySide6.QtWidgets import QMessageBox  # pylint: disable=no-name-in-module
 
 from riskapp_client.services import permissions
+
 
 class TopHistoryMixin:
     """MainWindow mixin: TopHistoryMixin"""
     def _maybe_auto_snapshot(self) -> None:
-        """Take a snapshot automatically if enabled and the interval has elapsed.
-
-        Uses an in-memory per-project throttle (last snapshot timestamp).
-        """
+        """Take a snapshot automatically if enabled and the interval has elapsed."""
+        tab = self.top_tab
         pid = self.current_project_id
-        if not pid:
+        if not pid or self._detect_offline_mode():
             return
 
-        # Only meaningful online and when the user has manager rights.
-        if self._detect_offline_mode():
-            return
-
-        if not self.auto_snapshot_chk.isEnabled() or not self.auto_snapshot_chk.isChecked():
+        if not tab.auto_snapshot_chk.isEnabled() or not tab.auto_snapshot_chk.isChecked():
             return
 
         if not permissions.role_at_least(self.current_role, "manager"):
             QMessageBox.information(self, "Not allowed", "You need manager role to create snapshot.")
             return
 
-        days = int(self.auto_snapshot_days.value())
+        days = int(tab.auto_snapshot_days.value())
         if days <= 0:
             return
 
         now = datetime.utcnow()
         last = self._last_auto_snapshot_by_project.get(pid)
-        if last is not None:
-            if (now - last) < timedelta(days=days):
-                return
+        if last is not None and (now - last) < timedelta(days=days):
+            return
 
-        # Note: server snapshot captures both risks and opportunities; the kind selector is informational.
         try:
             if hasattr(self.backend, "create_snapshot"):
                 self.backend.create_snapshot(pid)  # type: ignore[attr-defined]
@@ -55,118 +48,99 @@ class TopHistoryMixin:
         self._refresh_top_history()
 
     def _snapshot_now(self) -> None:
+        tab = self.top_tab
         pid = self.current_project_id
         if not pid:
             return
-
         if not hasattr(self.backend, "create_snapshot"):
             QMessageBox.information(self, "Snapshots", "This backend does not support snapshots.")
             return
 
-        try:
-            self.backend.create_snapshot(pid)  # type: ignore[attr-defined]
-        except Exception as e:
-            QMessageBox.critical(self, "Snapshot failed", str(e))
+        if self._call_backend("Snapshot failed", self.backend.create_snapshot, pid) is None:  # type: ignore[attr-defined]
             return
 
         self._refresh_top_history()
 
     def _refresh_top_history(self) -> None:
+        tab = self.top_tab
         pid = self.current_project_id
         if not pid:
             return
 
         if not hasattr(self.backend, "top_history"):
-            self.top_table.setRowCount(0)
-            if hasattr(self, "top_report"):
-                self.top_report.setText("Top history not supported by this backend.")
+            tab.top_table.setRowCount(0)
+            tab.top_report.setText("Top history not supported by this backend.")
             return
 
-        # read UI filters
-        kind_ui = self.top_kind.currentText().strip().lower() if hasattr(self, "top_kind") else "risks"
+        kind_ui = tab.top_kind.currentText().strip().lower()
         kind = "risks" if kind_ui.startswith("risk") else "opportunities"
-        limit = int(self.top_limit.value()) if hasattr(self, "top_limit") else 10
+        limit = int(tab.top_limit.value())
 
-        period = self.top_period.currentText() if hasattr(self, "top_period") else "All"
+        period = tab.top_period.currentText()
         from_ts = None
         to_ts = None
         if period != "All":
-            from_ts = self._dtedit_to_iso_utc_naive(self.top_from)
-            to_ts = self._dtedit_to_iso_utc_naive(self.top_to)
-
-            # safety: swap if user picked reversed range
+            from_ts = self._dtedit_to_iso_utc_naive(tab.top_from)
+            to_ts = self._dtedit_to_iso_utc_naive(tab.top_to)
             if from_ts and to_ts and from_ts > to_ts:
                 from_ts, to_ts = to_ts, from_ts
 
-        try:
-            batches = self.backend.top_history(  # type: ignore[attr-defined]
-                pid,
-                kind=kind,
-                limit=limit,
-                from_ts=from_ts,
-                to_ts=to_ts,
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "Top history failed", str(e))
+        batches = self._call_backend(
+            "Top history failed",
+            self.backend.top_history,  # type: ignore[attr-defined]
+            pid,
+            kind=kind,
+            limit=limit,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+        
+        if batches is None:
             return
 
-        self.top_table.setRowCount(0)
+        tab.top_table.setRowCount(0)
 
         total_items = 0
         total_batches = 0
 
-        for b in (batches or []):
+        for batch in (batches or []):
             total_batches += 1
-            captured_raw = str(b.get("captured_at", ""))
-            # small formatting: "YYYY-mm-dd HH:MM:SS"
+            captured_raw = str(batch.get("captured_at", ""))
             captured = captured_raw.replace("T", " ")[:19] if captured_raw else ""
 
-            top = b.get("top") or []
+            top = batch.get("top") or []
             for idx, item in enumerate(top, start=1):
                 total_items += 1
-                row = self.top_table.rowCount()
-                self.top_table.insertRow(row)
+                row = tab.top_table.rowCount()
+                tab.top_table.insertRow(row)                
 
-                self.top_table.setItem(row, 0, QTableWidgetItem(captured if idx == 1 else ""))  # reduce repeats
-                self.top_table.setItem(row, 1, QTableWidgetItem(str(idx)))
-                self.top_table.setItem(row, 2, QTableWidgetItem(str(item.get("title", ""))))
+                tab.top_table.setItem(row, 0, self._mk_item(captured if idx == 1 else ""))
+                tab.top_table.setItem(row, 1, self._mk_item(str(idx), align_center=True))
+                tab.top_table.setItem(row, 2, self._mk_item(str(item.get("title", ""))))
+                tab.top_table.setItem(row, 3, self._mk_item(str(item.get("probability", "")), align_center=True))
+                tab.top_table.setItem(row, 4, self._mk_item(str(item.get("impact", "")), align_center=True))
+                tab.top_table.setItem(row, 5, self._mk_item(str(item.get("score", "")), align_center=True))
 
-                p = str(item.get("probability", ""))
-                i = str(item.get("impact", ""))
-                s = str(item.get("score", ""))
-
-                self.top_table.setItem(row, 3, QTableWidgetItem(p))
-                self.top_table.setItem(row, 4, QTableWidgetItem(i))
-                self.top_table.setItem(row, 5, QTableWidgetItem(s))
-
-                for c in (1, 3, 4, 5):
-                    it = self.top_table.item(row, c)
-                    if it:
-                        it.setTextAlignment(Qt.AlignCenter)
-
-        if hasattr(self, "top_report"):
-            self.top_report.setText(
+        tab.top_report.setText(
                 f"{kind.capitalize()} · Top {limit} · {period}"
                 + (f" · {total_batches} snapshot(s) · {total_items} row(s)" if total_batches else " · (no data)")
             )
 
-        self.top_table.resizeColumnsToContents()
+        tab.top_table.resizeColumnsToContents()
 
     def _on_top_period_changed(self, _text: str) -> None:
-        """
-        Update the From/To widgets and toggle editability based on selected period.
-        """
-        period = self.top_period.currentText()
+        """Update the From/To widgets and toggle editability based on selected period."""
+        tab = self.top_tab
+        period = tab.top_period.currentText()
         now = QDateTime.currentDateTime()
 
         if period == "Last 7 days":
-            self.top_to.setDateTime(now)
-            self.top_from.setDateTime(now.addDays(-7))
+            tab.top_to.setDateTime(now)
+            tab.top_from.setDateTime(now.addDays(-7))
         elif period == "Last 30 days":
-            self.top_to.setDateTime(now)
-            self.top_from.setDateTime(now.addDays(-30))
-        # "All" and "Custom" don't force a range here (Custom uses whatever user picked)
+            tab.top_to.setDateTime(now)
+            tab.top_from.setDateTime(now.addDays(-30))
 
         custom = (period == "Custom")
-        self.top_from.setEnabled(custom)
-        self.top_to.setEnabled(custom)
+        tab.top_from.setEnabled(custom)
+        tab.top_to.setEnabled(custom)

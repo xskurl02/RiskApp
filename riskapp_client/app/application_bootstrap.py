@@ -13,12 +13,13 @@ import logging
 
 from PySide6.QtWidgets import QDialog, QMessageBox  # pylint: disable=no-name-in-module
 
-from riskapp_client.adapters.local.sqlite_store import LocalStore
-from riskapp_client.adapters.remote.api_backend import ApiBackend
-from riskapp_client.app.config import AppConfig
-from riskapp_client.services.offline_first_backend import OfflineFirstBackend
-from riskapp_client.ui.main_window import MainWindow
-from riskapp_client.ui.widgets import LoginDialog
+from riskapp_client.adapters.local_storage.sqlite_data_store import LocalStore
+from riskapp_client.adapters.remote_api.rest_api_client import ApiBackend
+from riskapp_client.utils.url_validation_helpers import UrlPolicy
+from riskapp_client.app.environment_config import AppConfig
+from riskapp_client.services.offline_first_facade import OfflineFirstBackend
+from riskapp_client.ui.main_application_window import MainWindow
+from riskapp_client.ui.components.custom_gui_widgets import LoginDialog
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ def build_main_window(config: AppConfig) -> MainWindow:
             base_url=base_url,
             email=email,
             password=password,
+            url_policy=UrlPolicy(allow_http_anywhere=config.allow_http_anywhere),
             auto_create_project=config.auto_create_project,
         )
     except Exception as exc:  # noqa: BLE001 - UX-driven fallback

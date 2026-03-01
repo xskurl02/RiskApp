@@ -1,10 +1,12 @@
 """MainWindow UI construction.
 
 Builds the Qt layout and wires tab widgets to mixin callbacks.
+
+To minimize churn, tab widget attributes are bound onto the MainWindow via small
+name-lists instead of dozens of one-off assignments.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt  # pylint: disable=no-name-in-module
 from PySide6.QtWidgets import (  # pylint: disable=no-name-in-module
     QApplication,
     QHBoxLayout,
@@ -16,18 +18,38 @@ from PySide6.QtWidgets import (  # pylint: disable=no-name-in-module
     QWidget,
 )
 
-from riskapp_client.ui.tabs.actions import ActionsTab
-from riskapp_client.ui.tabs.assessments import AssessmentsTab
-from riskapp_client.ui.tabs.matrix import MatrixTab
-from riskapp_client.ui.tabs.members import MembersTab
-from riskapp_client.ui.tabs.opportunities import OpportunitiesTab
-from riskapp_client.ui.tabs.risks import RisksTab
-from riskapp_client.ui.tabs.top_history import TopHistoryTab
+from riskapp_client.ui.tabs.actions_tab import ActionsTab
+from riskapp_client.ui.tabs.assessments_tab import AssessmentsTab
+from riskapp_client.ui.tabs.matrix_tab import MatrixTab
+from riskapp_client.ui.tabs.members_tab import MembersTab
+from riskapp_client.ui.tabs.opportunities_tab import OpportunitiesTab
+from riskapp_client.ui.tabs.risks_tab import RisksTab
+from riskapp_client.ui.tabs.top_history_tab import TopHistoryTab
+
+_RISKS_ALIASES = (
+    "filter_search", "filter_min_score", "filter_max_score", "filter_report", "filter_status",
+    "filter_category", "filter_owner", "filter_from", "filter_to", "risks_table", "risk_form",
+    "new_risk_btn", "editor_label",
+)
+
+_OPPS_ALIASES = (
+    "opp_filter_search", "opp_filter_min_score", "opp_filter_max_score", "opp_filter_status",
+    "opp_filter_category", "opp_filter_owner", "opp_filter_from", "opp_filter_to", "opp_filter_report",
+    "opps_table", "opp_editor_label", "opp_form", "new_opp_btn",
+)
 
 class LayoutMixin:
     """MainWindow mixin: LayoutMixin"""
+
     def _build_ui(self) -> None:
         """Construct all Qt widgets and wire callbacks."""
+
+        def bind(src: object, names: tuple[str, ...], **renamed: str) -> None:
+            for name in names:
+                setattr(self, name, getattr(src, name))
+            for dst, src_name in renamed.items():
+                setattr(self, dst, getattr(src, src_name))
+
         self.setWindowTitle("RiskApp")
         self.resize(1000, 650)
 
@@ -87,23 +109,7 @@ class LayoutMixin:
             on_fit_table_card=lambda: self._fit_table_card(),
         )
         self.tabs.addTab(self.risks_tab, "Risks")
-
-        # Backward-compatible attribute aliases (existing methods expect these names)
-        self.filter_search = self.risks_tab.filter_search
-        self.filter_min_score = self.risks_tab.filter_min_score
-        self.filter_max_score = self.risks_tab.filter_max_score
-        self.filter_report = self.risks_tab.filter_report
-        self.filter_status = self.risks_tab.filter_status
-        self.filter_category = self.risks_tab.filter_category
-        self.filter_owner = self.risks_tab.filter_owner
-        self.filter_from = self.risks_tab.filter_from
-        self.filter_to = self.risks_tab.filter_to
-        self.risks_table = self.risks_tab.risks_table
-        self.risk_form = self.risks_tab.risk_form
-        self.new_risk_btn = self.risks_tab.new_risk_btn
-        self.editor_label = self.risks_tab.editor_label
-        self._table_card = self.risks_tab.table_card
-        self._editor_card = self.risks_tab.editor_card
+        bind(self.risks_tab, _RISKS_ALIASES, _table_card="table_card", _editor_card="editor_card")
 
         # Tab: Opportunities
         self.opps_tab = OpportunitiesTab(
@@ -112,23 +118,10 @@ class LayoutMixin:
             on_opportunity_clicked=self._on_opportunity_clicked,
             on_new_opportunity=self._start_new_opportunity,
             on_save_opportunity=self._save_opportunity,
-            on_mark_dirty=lambda *_: setattr(self, "_opp_editor_dirty", True),
+            on_mark_dirty=self._mark_opp_editor_dirty,
         )
         self.tabs.addTab(self.opps_tab, "Opportunities")
-
-        self.opp_filter_search = self.opps_tab.opp_filter_search
-        self.opp_filter_min_score = self.opps_tab.opp_filter_min_score
-        self.opp_filter_max_score = self.opps_tab.opp_filter_max_score
-        self.opp_filter_status = self.opps_tab.opp_filter_status
-        self.opp_filter_category = self.opps_tab.opp_filter_category
-        self.opp_filter_owner = self.opps_tab.opp_filter_owner
-        self.opp_filter_from = self.opps_tab.opp_filter_from
-        self.opp_filter_to = self.opps_tab.opp_filter_to
-        self.opp_filter_report = self.opps_tab.opp_filter_report
-        self.opps_table = self.opps_tab.opps_table
-        self.opp_editor_label = self.opps_tab.opp_editor_label
-        self.opp_form = self.opps_tab.opp_form
-        self.new_opp_btn = self.opps_tab.new_opp_btn
+        bind(self.opps_tab, _OPPS_ALIASES, _opp_editor_card="editor_card")
 
         # Tab: Matrix
         self.matrix_tab = MatrixTab()
@@ -144,22 +137,8 @@ class LayoutMixin:
         )
         self.tabs.addTab(self.top_tab, "Top history")
 
-        self.snapshot_btn = self.top_tab.snapshot_btn
-        self.auto_snapshot_chk = self.top_tab.auto_snapshot_chk
-        self.auto_snapshot_kind = self.top_tab.auto_snapshot_kind
-        self.auto_snapshot_days = self.top_tab.auto_snapshot_days
-        self._auto_snap_timer = self.top_tab.auto_snap_timer
-        self.top_kind = self.top_tab.top_kind
-        self.top_limit = self.top_tab.top_limit
-        self.top_period = self.top_tab.top_period
-        self.top_from = self.top_tab.top_from
-        self.top_to = self.top_tab.top_to
-        self.refresh_top_btn = self.top_tab.refresh_top_btn
-        self.top_report = self.top_tab.top_report
-        self.top_table = self.top_tab.top_table
-
         # Ensure period selection initializes from/to range + disables edits when not Custom.
-        self._on_top_period_changed(self.top_period.currentText())
+        self._on_top_period_changed(self.top_tab.top_period.currentText())
 
         # Tab: Actions
         self.actions_tab = ActionsTab(
@@ -170,28 +149,9 @@ class LayoutMixin:
         )
         self.tabs.addTab(self.actions_tab, "Actions")
 
-        self.actions_table = self.actions_tab.actions_table
-        self.action_editor_label = self.actions_tab.action_editor_label
-        self.action_target_type = self.actions_tab.action_target_type
-        self.action_risk_combo = self.actions_tab.action_risk_combo
-        self.action_opp_combo = self.actions_tab.action_opp_combo
-        self.action_kind = self.actions_tab.action_kind
-        self.action_status = self.actions_tab.action_status
-        self.action_title = self.actions_tab.action_title
-        self.action_desc = self.actions_tab.action_desc
-        self.action_owner = self.actions_tab.action_owner
-        self.action_save_btn = self.actions_tab.action_save_btn
-        self.action_new_btn = self.actions_tab.action_new_btn
-
         # Tab: Assessments
         self.assessments_tab = AssessmentsTab(on_save_assessment=self._save_assessment)
         self.tabs.addTab(self.assessments_tab, "Assessments")
-
-        self.assess_p = self.assessments_tab.assess_p
-        self.assess_i = self.assessments_tab.assess_i
-        self.assess_notes = self.assessments_tab.assess_notes
-        self.assess_save_btn = self.assessments_tab.assess_save_btn
-        self.assessments_table = self.assessments_tab.assessments_table
 
         # Tab: Members
         self.members_tab = MembersTab(
@@ -202,19 +162,13 @@ class LayoutMixin:
         )
         self.tabs.addTab(self.members_tab, "Members")
 
-        self.members_hint = self.members_tab.members_hint
-        self.member_email = self.members_tab.member_email
-        self.member_role = self.members_tab.member_role
-        self.member_add_btn = self.members_tab.member_add_btn
-        self.member_remove_btn = self.members_tab.member_remove_btn
-        self.member_refresh_btn = self.members_tab.member_refresh_btn
-        self.members_table = self.members_tab.members_table
-
         # Layout polish
         root_layout.setContentsMargins(12, 12, 12, 12)
         root_layout.setSpacing(12)
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(8)
+
+        # Keep the original spacing tweaks for the most dense tabs.
         self.risks_tab.layout().setContentsMargins(8, 8, 8, 8)
         self.risks_tab.layout().setSpacing(8)
         self.matrix_tab.layout().setContentsMargins(8, 8, 8, 8)

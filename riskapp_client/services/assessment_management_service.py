@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from typing import Optional
 
-from riskapp_client.adapters.local.outbox import OutboxStore
-from riskapp_client.adapters.local.sqlite_store import LocalStore, utc_iso
-from riskapp_client.domain.models import Assessment
+from riskapp_client.adapters.local_storage.sync_outbox_queue import OutboxStore
+from riskapp_client.adapters.local_storage.sqlite_data_store import LocalStore, utc_iso
+from riskapp_client.domain.domain_models import Assessment
 
 
 class AssessmentService:
@@ -27,15 +26,12 @@ class AssessmentService:
         assessor_user_id: str,
         probability: int,
         impact: int,
-        notes: Optional[str] = None,
+        notes: str | None = None,
     ) -> Assessment:
         assessment_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"assessment:{risk_id}:{assessor_user_id}"))
         updated_at = utc_iso()
 
-        try:
-            _, version = self._store.get_assessment_project_and_version(assessment_id)
-        except Exception:  # noqa: BLE001
-            version = 0
+        version = self._get_version_or_0(assessment_id)
 
         self._store.upsert_local_assessment(
             assessment_id=assessment_id,
@@ -71,3 +67,10 @@ class AssessmentService:
             version=version,
             is_deleted=False,
         )
+
+    def _get_version_or_0(self, assessment_id: str) -> int:
+        try:
+            _, version = self._store.get_assessment_project_and_version(assessment_id)
+            return int(version)
+        except Exception:  # noqa: BLE001
+            return 0

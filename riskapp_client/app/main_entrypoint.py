@@ -6,9 +6,9 @@ import sys
 
 from PySide6.QtWidgets import QApplication  # pylint: disable=no-name-in-module
 
-from riskapp_client.app.bootstrap import build_main_window
-from riskapp_client.app.config import AppConfig
-from riskapp_client.utils.logging_config import configure_logging
+from riskapp_client.app.application_bootstrap import build_main_window
+from riskapp_client.app.environment_config import AppConfig
+from riskapp_client.utils.logging_configuration import configure_logging
 
 
 def main() -> int:

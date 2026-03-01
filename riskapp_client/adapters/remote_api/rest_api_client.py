@@ -11,9 +11,11 @@ import urllib.request
 import uuid
 from typing import Dict, List, Optional
 
-from riskapp_client.domain.models import Project, Risk, Opportunity, Action, Assessment, Member
-from riskapp_client.services.scored_fields import SCORED_ENTITY_META_KEYS
-from riskapp_client.services.security import UrlPolicy, validate_base_url
+from riskapp_client.domain.domain_models import Project, Risk, Opportunity, Action, Assessment, Member
+from riskapp_client.adapters.mappers.scored_entity_mapper import scored_entity_from_mapping
+from riskapp_client.adapters.mappers.action_assessment_mapper import action_from_mapping, assessment_from_mapping
+from riskapp_client.domain.scored_entity_fields import SCORED_ENTITY_META_KEYS
+from riskapp_client.utils.url_validation_helpers import UrlPolicy, validate_base_url
 
 _MAX_RESPONSE_BYTES = 5_000_000  # 5 MB defensive cap for JSON payloads
 
@@ -276,33 +278,7 @@ class ApiBackend:
             except Exception:
                 pass
 
-        return Risk(
-            id=rid,
-            project_id=pid,
-            code=(j.get("code") or None),
-            title=j.get("title", "") or "",
-            description=j.get("description"),
-            category=j.get("category"),
-            threat=j.get("threat"),
-            triggers=j.get("triggers"),
-            owner_user_id=str(j["owner_user_id"]) if j.get("owner_user_id") else None,
-            status=(j.get("status") or None),
-            identified_at=str(j.get("identified_at") or "") or None,
-            status_changed_at=str(j.get("status_changed_at") or "") or None,
-            response_at=str(j.get("response_at") or "") or None,
-            occurred_at=str(j.get("occurred_at") or "") or None,
-            probability=int(j.get("probability", 1)),
-            impact=int(j.get("impact", 1)),
-            impact_cost=(int(j["impact_cost"]) if j.get("impact_cost") is not None else None),
-            impact_time=(int(j["impact_time"]) if j.get("impact_time") is not None else None),
-            impact_scope=(int(j["impact_scope"]) if j.get("impact_scope") is not None else None),
-            impact_quality=(int(j["impact_quality"]) if j.get("impact_quality") is not None else None),
-            mitigation_plan=j.get("mitigation_plan"),
-            document_url=j.get("document_url"),
-            version=int(j.get("version", 0) or 0),
-            is_deleted=bool(j.get("is_deleted", False)),
-            updated_at=str(j.get("updated_at", "") or ""),
-        )
+        return scored_entity_from_mapping(j, model_cls=Risk)
     
     def _to_opportunity(self, j) -> Opportunity:
         oid = str(j["id"])
@@ -315,60 +291,29 @@ class ApiBackend:
             except Exception:
                 pass
 
-        return Opportunity(
-            id=oid,
-            project_id=pid,
-            code=(j.get("code") or None),
-            title=j.get("title", "") or "",
-            description=j.get("description"),
-            category=j.get("category"),
-            threat=j.get("threat"),
-            triggers=j.get("triggers"),
-            owner_user_id=str(j["owner_user_id"]) if j.get("owner_user_id") else None,
-            status=(j.get("status") or None),
-            identified_at=str(j.get("identified_at") or "") or None,
-            status_changed_at=str(j.get("status_changed_at") or "") or None,
-            response_at=str(j.get("response_at") or "") or None,
-            occurred_at=str(j.get("occurred_at") or "") or None,
-            probability=int(j.get("probability", 1)),
-            impact=int(j.get("impact", 1)),
-            impact_cost=(int(j["impact_cost"]) if j.get("impact_cost") is not None else None),
-            impact_time=(int(j["impact_time"]) if j.get("impact_time") is not None else None),
-            impact_scope=(int(j["impact_scope"]) if j.get("impact_scope") is not None else None),
-            impact_quality=(int(j["impact_quality"]) if j.get("impact_quality") is not None else None),
-            mitigation_plan=j.get("mitigation_plan"),
-            document_url=j.get("document_url"),
-            version=int(j.get("version", 0) or 0),
-            is_deleted=bool(j.get("is_deleted", False)),
-            updated_at=str(j.get("updated_at", "") or ""),
-        )
+        return scored_entity_from_mapping(j, model_cls=Opportunity)
 
 
     def _to_action(self, j) -> Action:
-        aid = str(j["id"])
-        pid = str(j["project_id"])
+        action = action_from_mapping(j)
+        aid = str(action.id)
+        pid = str(action.project_id)
         self._action_to_project[aid] = pid
 
-        if "version" in j:
-            try:
-                self._action_version[aid] = int(j["version"])
-            except Exception:
-                pass
+        try:
+            self._action_version[aid] = int(getattr(action, 'version', 0) or 0)
+        except Exception:
+            pass
+        return action
 
-        return Action(
-            id=aid,
-            project_id=pid,
-            risk_id=str(j["risk_id"]) if j.get("risk_id") else None,
-            opportunity_id=str(j["opportunity_id"]) if j.get("opportunity_id") else None,
-            kind=str(j.get("kind") or ""),
-            title=str(j.get("title") or ""),
-            description=str(j.get("description") or "") if j.get("description") else "",
-            status=str(j.get("status") or "open"),
-            owner_user_id=str(j["owner_user_id"]) if j.get("owner_user_id") else None,
-            version=int(j.get("version", 0) or 0),
-            is_deleted=bool(j.get("is_deleted", False)),
-            updated_at=str(j.get("updated_at", "") or ""),
-        )
+    def _build_scored_payload(self, title: str, probability: int, impact: int, meta: dict) -> dict:
+        """Helper to build consistent JSON payload for Risks and Opportunities."""
+        body = {"title": title, "probability": int(probability), "impact": int(impact)}
+        for k in SCORED_ENTITY_META_KEYS:
+            v = meta.get(k)
+            if v is not None and str(v).strip() != "":
+                body[k] = v
+        return body
 
     def list_projects(self) -> List[Project]:
         j = self._req("GET", "/projects")
@@ -380,17 +325,7 @@ class ApiBackend:
         return projects
 
     def _to_assessment(self, j) -> Assessment:
-        return Assessment(
-            id=str(j["id"]),
-            risk_id=str(j["risk_id"]),
-            assessor_user_id=str(j.get("assessor_user_id") or ""),
-            probability=int(j.get("probability", 1)),
-            impact=int(j.get("impact", 1)),
-            notes=str(j.get("notes") or ""),
-            version=int(j.get("version", 0) or 0),
-            is_deleted=bool(j.get("is_deleted", False)),
-            updated_at=str(j.get("updated_at", "") or ""),
-        )
+        return assessment_from_mapping(j)
     
     #--- Opportunities ---
 
@@ -432,11 +367,7 @@ class ApiBackend:
         return [self._to_opportunity(x) for x in (j or [])]
 
     def create_opportunity(self, project_id: str, *, title: str, probability: int, impact: int, **meta) -> Opportunity:
-        body = {"title": title, "probability": int(probability), "impact": int(impact)}
-        for k in SCORED_ENTITY_META_KEYS:
-            v = meta.get(k)
-            if v is not None and str(v).strip() != "":
-                body[k] = v
+        body = self._build_scored_payload(title, probability, impact, meta)
         j = self._req("POST", f"/projects/{project_id}/opportunities", json_body=body)
         return self._to_opportunity(j)
 
@@ -444,11 +375,7 @@ class ApiBackend:
         pid = self._opp_to_project.get(opportunity_id)
         if not pid:
             raise KeyError("Unknown opportunity_id (select the project and refresh first)")
-
-        body = {"title": title, "probability": int(probability), "impact": int(impact)}
-        for k in SCORED_ENTITY_META_KEYS:
-            if k in meta:
-                body[k] = meta.get(k)
+        body = self._build_scored_payload(title, probability, impact, meta)
 
         if opportunity_id in self._opp_version:
             body["base_version"] = int(self._opp_version[opportunity_id])
@@ -509,12 +436,7 @@ class ApiBackend:
         return [self._to_risk(x) for x in (j or [])]
 
     def create_risk(self, project_id: str, *, title: str, probability: int, impact: int, **meta) -> Risk:
-        body = {"title": title, "probability": int(probability), "impact": int(impact)}
-        # include only meaningful metadata
-        for k in SCORED_ENTITY_META_KEYS:
-            v = meta.get(k)
-            if v is not None and str(v).strip() != "":
-                body[k] = v
+        body = self._build_scored_payload(title, probability, impact, meta)
         j = self._req("POST", f"/projects/{project_id}/risks", json_body=body)
         return self._to_risk(j)
 
@@ -523,12 +445,7 @@ class ApiBackend:
         pid = self._risk_to_project.get(risk_id)
         if not pid:
             raise KeyError("Unknown risk_id (select the project and refresh first)")
-
-        body = {"title": title, "probability": int(probability), "impact": int(impact)}
-        for k in SCORED_ENTITY_META_KEYS:
-            if k in meta:
-                body[k] = meta.get(k)
-
+        body = self._build_scored_payload(title, probability, impact, meta)
         if risk_id in self._risk_version:
             body["base_version"] = int(self._risk_version[risk_id])
 
