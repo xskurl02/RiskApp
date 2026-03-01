@@ -14,14 +14,16 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db import ProjectMember
+from db import ProjectMember, Role
 
-ROLE_RANK: dict[str, int] = {"viewer": 1, "member": 2, "manager": 3, "admin": 4}
+ROLE_RANK: dict[str, int] = {Role.viewer.value: 1, Role.member.value: 2, Role.manager.value: 3, Role.admin.value: 4}
 
 
-def ensure_role_at_least(role: str, min_role: str) -> None:
+def ensure_role_at_least(role: str | Role, min_role: str | Role) -> None:
     """Raise 403 if `role` is below `min_role`."""
-    if ROLE_RANK.get(role, 0) < ROLE_RANK.get(min_role, 10_000):
+    r_val = role.value if isinstance(role, Role) else role
+    m_val = min_role.value if isinstance(min_role, Role) else min_role
+    if ROLE_RANK.get(r_val, 0) < ROLE_RANK.get(m_val, 10_000):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
 
@@ -58,7 +60,7 @@ def require_min_role(
     project_id: uuid.UUID,
     user_id: uuid.UUID,
     *,
-    min_role: str,
+    min_role: Role | str,
 ) -> str:
     role = require_project_role(
         db,
@@ -71,7 +73,7 @@ def require_min_role(
 
 
 def ensure_member(db: Session, project_id: uuid.UUID, user_id: uuid.UUID) -> str:
-    return require_min_role(db, project_id, user_id, min_role="viewer")
+    return require_min_role(db, project_id, user_id, min_role=Role.viewer)
 
 
 def require_project_member(db: Session, project_id: uuid.UUID, user_id: uuid.UUID) -> str:

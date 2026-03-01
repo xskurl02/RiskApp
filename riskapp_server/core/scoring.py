@@ -20,12 +20,8 @@ def compute_overall_impact(
     impact_quality: int | None = None,
 ) -> int:
     """Compute overall impact as max of provided dimensions, or fallback."""
-    dims: list[int] = []
-    for v in (impact_cost, impact_time, impact_scope, impact_quality):
-        if v is not None:
-            dims.append(int(v))
+    dims = [int(v) for v in (impact_cost, impact_time, impact_scope, impact_quality) if v is not None]
     return max(dims) if dims else int(fallback)
-
 
 def ensure_int_range(value: object, *, field: str, lo: int, hi: int) -> int:
     try:
@@ -42,10 +38,9 @@ def ensure_int_1_5(value: object, field: str) -> int:
 
 
 def overall_impact_from_record(record: dict, fallback: int) -> int:
-    dims: list[int] = []
-    for key in ("impact_cost", "impact_time", "impact_scope", "impact_quality"):
-        if record.get(key) is not None:
-            dims.append(ensure_int_1_5(record.get(key), key))
-    if dims:
-        return max(dims)
-    return ensure_int_1_5(record.get("impact", fallback), "impact")
+    dims = [
+        ensure_int_1_5(record[k], k) 
+        for k in ("impact_cost", "impact_time", "impact_scope", "impact_quality") 
+        if record.get(k) is not None
+    ]
+    return max(dims) if dims else ensure_int_1_5(record.get("impact", fallback), "impact")

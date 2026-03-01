@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
@@ -37,27 +37,22 @@ def matrix(
     opps_m = blank() if kind_norm in {"opportunity", "both"} else None
 
     if risks_m is not None:
-        for r in (
-            db.execute(
-                select(Risk).where(Risk.project_id == project_id, Risk.is_deleted.is_(False))
-            )
-            .scalars()
-            .all()
-        ):
-            risks_m[r.probability - 1][r.impact - 1] += 1
+        counts = db.execute(
+            select(Risk.probability, Risk.impact, func.count(Risk.id))
+            .where(Risk.project_id == project_id, Risk.is_deleted.is_(False))
+            .group_by(Risk.probability, Risk.impact)
+        ).all()
+        for p, i, count in counts:
+            risks_m[p - 1][i - 1] = count
 
     if opps_m is not None:
-        for o in (
-            db.execute(
-                select(Opportunity).where(
-                    Opportunity.project_id == project_id,
-                    Opportunity.is_deleted.is_(False),
-                )
-            )
-            .scalars()
-            .all()
-        ):
-            opps_m[o.probability - 1][o.impact - 1] += 1
+        counts = db.execute(
+            select(Opportunity.probability, Opportunity.impact, func.count(Opportunity.id))
+            .where(Opportunity.project_id == project_id, Opportunity.is_deleted.is_(False))
+            .group_by(Opportunity.probability, Opportunity.impact)
+        ).all()
+        for p, i, count in counts:
+            opps_m[p - 1][i - 1] = count
 
     return MatrixResponse(
         kind=kind_norm,

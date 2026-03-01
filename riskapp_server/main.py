@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from api.routers.actions import router as actions_router
@@ -12,13 +13,13 @@ from api.routers.snapshots import router as snapshots_router
 from api.routers.sync_routes import router as sync_router
 from db import init_db
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield  # Allows for future teardown logic to be placed after the yield
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Risk / Opportunity API")
-
-    @app.on_event("startup")
-    def _startup() -> None:
-        init_db()
+    app = FastAPI(title="Risk / Opportunity API", lifespan=lifespan)
 
     app.include_router(auth_router)
     app.include_router(projects_router)

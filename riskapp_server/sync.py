@@ -32,6 +32,7 @@ from db import (
     RiskAssessment,
     SyncReceipt,
 )
+from schemas import SyncItemRecord, SyncActionRecord, SyncAssessmentRecord
 
 ENTITY_MODELS = {
     "risk": Risk,
@@ -100,24 +101,42 @@ def _min_role_for_change(entity: str, op: str) -> str:
         return "manager"
     return "member"
 
+def _handle_sync_error(db: Session, errors_list: list, change_id: uuid.UUID, user_id: uuid.UUID, project_id: uuid.UUID, entity: str, entity_id: uuid.UUID | None, op: str, reason: str, detail: str | None = None) -> None:
+    """Helper to DRY up error tracking and receipt storage during sync push."""
+    resp = {"reason": reason}
+    if detail:
+        resp["detail"] = detail
+        
+    _store_receipt_best_effort(
+        db=db, change_id=change_id, user_id=user_id, project_id=project_id,
+        entity=str(entity or ""), entity_id=entity_id, op=str(op or ""),
+        status="error", response=resp
+    )
+    err_entry = {"change_id": str(change_id), "reason": reason}
+    if entity: err_entry["entity"] = entity
+    if op: err_entry["op"] = op
+    if detail: err_entry["detail"] = detail
+    errors_list.append(err_entry)
+
+def _handle_sync_conflict(db: Session, conflicts_list: list, change_id: uuid.UUID, user_id: uuid.UUID, project_id: uuid.UUID, entity: str, entity_id: uuid.UUID | None, op: str, reason: str, server_version: int | None) -> None:
+    """Helper to DRY up conflict tracking and receipt storage during sync push."""
+    _store_receipt_best_effort(
+        db=db, change_id=change_id, user_id=user_id, project_id=project_id,
+        entity=str(entity), entity_id=entity_id, op=str(op),
+        status="conflict", response={"reason": reason, "server_version": server_version}
+    )
+    conflicts_list.append({
+        "change_id": str(change_id), "entity": entity, "entity_id": str(entity_id) if entity_id else None,
+        "id": str(entity_id) if entity_id else None, "reason": reason, "server_version": server_version
+    })
 
 def pull_since(db: Session, project_id: uuid.UUID, since: datetime) -> dict[str, Any]:
     """Return all entities (including soft-deleted) updated after `since`."""
-    risks = db.execute(
-        select(Risk).where(Risk.project_id == project_id, Risk.updated_at > since)
-    ).scalars().all()
-
-    opportunities = db.execute(
-        select(Opportunity).where(
-            Opportunity.project_id == project_id, Opportunity.updated_at > since
-        )
-    ).scalars().all()
-
-    actions = db.execute(
-        select(Action).where(
-            Action.project_id == project_id, Action.updated_at > since
-        )
-    ).scalars().all()
+    fetched_entities = {}
+    for key, Model in [("risks", Risk), ("opportunities", Opportunity), ("actions", Action)]:
+        fetched_entities[key] = db.execute(
+            select(Model).where(Model.project_id == project_id, Model.updated_at > since)
+        ).scalars().all()
 
     assessments = (
         db.execute(
@@ -131,9 +150,9 @@ def pull_since(db: Session, project_id: uuid.UUID, since: datetime) -> dict[str,
 
     return {
         "server_time": utcnow(),
-        "risks": risks,
-        "opportunities": opportunities,
-        "actions": actions,
+        "risks": fetched_entities["risks"],
+        "opportunities": fetched_entities["opportunities"],
+        "actions": fetched_entities["actions"],
         "assessments": assessments,
     }
 
@@ -195,55 +214,18 @@ def push_changes(
             continue
 
         if entity not in ENTITY_MODELS:
-            _store_receipt_best_effort(
-                db=db,
-                change_id=change_uuid,
-                user_id=user_id,
-                project_id=project_id,
-                entity=str(entity or ""),
-                entity_id=None,
-                op=str(op or ""),
-                status="error",
-                response={"reason": "unknown_entity"},
-            )
-            errors.append(
-                {"change_id": str(change_uuid), "reason": "unknown_entity", "entity": entity}
-            )
+            _handle_sync_error(db, errors, change_uuid, user_id, project_id, entity, None, op, "unknown_entity")            
             continue
 
         if op not in OPS:
-            _store_receipt_best_effort(
-                db=db,
-                change_id=change_uuid,
-                user_id=user_id,
-                project_id=project_id,
-                entity=str(entity),
-                entity_id=None,
-                op=str(op or ""),
-                status="error",
-                response={"reason": "unknown_op"},
-            )
-            errors.append({"change_id": str(change_uuid), "reason": "unknown_op", "op": op})
+            _handle_sync_error(db, errors, change_uuid, user_id, project_id, entity, None, op, "unknown_op")
             continue
 
         # Permission check (defense-in-depth against clients bypassing normal CRUD endpoints)
         try:
             ensure_role_at_least(role, _min_role_for_change(str(entity), str(op)))
         except HTTPException:
-            _store_receipt_best_effort(
-                db=db,
-                change_id=change_uuid,
-                user_id=user_id,
-                project_id=project_id,
-                entity=str(entity),
-                entity_id=_maybe_entity_id(record),
-                op=str(op),
-                status="error",
-                response={"reason": "insufficient_permissions"},
-            )
-            errors.append(
-                {"change_id": str(change_uuid), "entity": entity, "reason": "insufficient_permissions"}
-            )
+            _handle_sync_error(db, errors, change_uuid, user_id, project_id, entity, _maybe_entity_id(record), op, "insufficient_permissions")
             continue
 
         try:
@@ -285,69 +267,13 @@ def push_changes(
             accepted += 1
 
         except ConflictError as exc:
-            _store_receipt_best_effort(
-                db=db,
-                change_id=change_uuid,
-                user_id=user_id,
-                project_id=project_id,
-                entity=str(entity),
-                entity_id=exc.entity_id,
-                op=str(op),
-                status="conflict",
-                response={"reason": exc.reason, "server_version": exc.server_version},
-            )
-            conflicts.append(
-                {
-                    "change_id": str(change_uuid),
-                    "entity": entity,
-                    "entity_id": str(exc.entity_id) if exc.entity_id else None,
-                    "id": str(exc.entity_id) if exc.entity_id else None,
-                    "reason": exc.reason,
-                    "server_version": exc.server_version,
-                }
-            )
+            _handle_sync_conflict(db, conflicts, change_uuid, user_id, project_id, entity, exc.entity_id, op, exc.reason, exc.server_version)
 
         except HTTPException as exc:
-            _store_receipt_best_effort(
-                db=db,
-                change_id=change_uuid,
-                user_id=user_id,
-                project_id=project_id,
-                entity=str(entity),
-                entity_id=_maybe_entity_id(record),
-                op=str(op),
-                status="error",
-                response={"reason": "http_error", "detail": exc.detail},
-            )
-            errors.append(
-                {
-                    "change_id": str(change_uuid),
-                    "entity": entity,
-                    "reason": "http_error",
-                    "detail": exc.detail,
-                }
-            )
+            _handle_sync_error(db, errors, change_uuid, user_id, project_id, entity, _maybe_entity_id(record), op, "http_error", exc.detail)
 
         except Exception as exc:
-            _store_receipt_best_effort(
-                db=db,
-                change_id=change_uuid,
-                user_id=user_id,
-                project_id=project_id,
-                entity=str(entity),
-                entity_id=_maybe_entity_id(record),
-                op=str(op),
-                status="error",
-                response={"reason": "exception", "detail": str(exc)},
-            )
-            errors.append(
-                {
-                    "change_id": str(change_uuid),
-                    "entity": entity,
-                    "reason": "exception",
-                    "detail": str(exc),
-                }
-            )
+            _handle_sync_error(db, errors, change_uuid, user_id, project_id, entity, _maybe_entity_id(record), op, "exception", str(exc))
 
     try:
         db.commit()
@@ -423,6 +349,30 @@ class ConflictError(Exception):
         self.server_version = server_version
         super().__init__(reason)
 
+def _parse_record(entity: str, record: dict) -> dict:
+    """Parses and validates sync records using Pydantic schemas."""
+    try:
+        if entity in {"risk", "opportunity"}:
+            return SyncItemRecord(**record).model_dump(mode='json', exclude_unset=True)
+        if entity == "action":
+            return SyncActionRecord(**record).model_dump(mode='json', exclude_unset=True)
+        if entity == "assessment":
+            return SyncAssessmentRecord(**record).model_dump(mode='json', exclude_unset=True)
+        return record
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Validation error: {exc}")
+
+def _fetch_obj_for_sync(db: Session, entity: str, entity_id: uuid.UUID, project_id: uuid.UUID):
+    Model = ENTITY_MODELS[entity]
+    if entity in {"risk", "opportunity", "action"}:
+        return db.execute(select(Model).where(Model.id == entity_id, Model.project_id == project_id)).scalars().first()
+    else:
+        # SECURITY FIX: Ensure the assessment's parent risk actually belongs to the user's project
+        return db.execute(
+            select(RiskAssessment)
+            .join(Risk, RiskAssessment.risk_id == Risk.id)
+            .where(RiskAssessment.id == entity_id, Risk.project_id == project_id)
+        ).scalars().first()
 
 def _apply_upsert(
     *,
@@ -435,23 +385,7 @@ def _apply_upsert(
     change_id: uuid.UUID,
 ) -> uuid.UUID:
     entity_id = parse_uuid(record.get("id"), "record.id")
-    Model = ENTITY_MODELS[entity]
-
-    if entity in {"risk", "opportunity", "action"}:
-        obj = (
-            db.execute(
-                select(Model).where(
-                    Model.id == entity_id,
-                    Model.project_id == project_id,
-                )
-            )
-            .scalars()
-            .first()
-        )
-    else:
-        obj = db.execute(
-            select(RiskAssessment).where(RiskAssessment.id == entity_id)
-        ).scalars().first()
+    obj = _fetch_obj_for_sync(db, entity, entity_id, project_id)
 
     if obj is None:
         obj = _create_new(db, user_id, project_id, entity, entity_id, record)
@@ -504,23 +438,7 @@ def _apply_delete(
     change_id: uuid.UUID,
 ) -> uuid.UUID:
     entity_id = parse_uuid(record.get("id"), "record.id")
-    Model = ENTITY_MODELS[entity]
-
-    if entity in {"risk", "opportunity", "action"}:
-        obj = (
-            db.execute(
-                select(Model).where(
-                    Model.id == entity_id,
-                    Model.project_id == project_id,
-                )
-            )
-            .scalars()
-            .first()
-        )
-    else:
-        obj = db.execute(
-            select(RiskAssessment).where(RiskAssessment.id == entity_id)
-        ).scalars().first()
+    obj = _fetch_obj_for_sync(db, entity, entity_id, project_id)
 
     if not obj:
         return entity_id
@@ -535,12 +453,9 @@ def _apply_delete(
 
     before = model_to_dict(obj)
 
-    if hasattr(obj, "is_deleted"):
-        obj.is_deleted = True
-    if hasattr(obj, "version"):
-        obj.version = int(obj.version) + 1
-    if hasattr(obj, "updated_at"):
-        obj.updated_at = utcnow()
+    obj.is_deleted = True
+    obj.version = int(obj.version) + 1
+    obj.updated_at = utcnow()
 
     after = model_to_dict(obj)
     _audit(
@@ -567,161 +482,45 @@ def _create_new(
 ):
     now = utcnow()
 
-    if entity == "risk":
-        p = ensure_int_1_5(record.get("probability", 1), "probability")
-        i = overall_impact_from_record(record, 1)
-        obj = Risk(
-            id=entity_id,
-            project_id=project_id,
-            title=str(record.get("title") or "").strip() or "Untitled risk",
-            probability=p,
-            impact=i,
-            impact_cost=record.get("impact_cost"),
-            impact_time=record.get("impact_time"),
-            impact_scope=record.get("impact_scope"),
-            impact_quality=record.get("impact_quality"),
-            code=(str(record.get("code") or "").strip() or None),
-            description=record.get("description"),
-            category=(str(record.get("category") or "").strip() or None),
-            threat=record.get("threat"),
-            triggers=record.get("triggers"),
-            mitigation_plan=record.get("mitigation_plan"),
-            document_url=record.get("document_url"),
-            owner_user_id=parse_uuid(record["owner_user_id"], "owner_user_id")
-            if record.get("owner_user_id")
-            else None,
-            status=(str(record.get("status") or "concept").strip() or "concept"),
-            identified_at=parse_dt(record.get("identified_at"), "identified_at") or now,
-            status_changed_at=parse_dt(record.get("status_changed_at"), "status_changed_at")
-            or now,
-            response_at=parse_dt(record.get("response_at"), "response_at"),
-            occurred_at=parse_dt(record.get("occurred_at"), "occurred_at"),
-            score=compute_score(p, i),
-            created_at=parse_dt(record.get("created_at"), "created_at") or now,
-            created_by=parse_uuid(record.get("created_by") or user_id, "created_by"),
-            updated_at=now,
-            version=1,
-            is_deleted=bool(record.get("is_deleted") or False),
-        )
-        db.add(obj)
-        return obj
+    val_data = _parse_record(entity, record)
+    Model = ENTITY_MODELS.get(entity)
+    if not Model:
+        raise HTTPException(status_code=400, detail="Unsupported entity")
 
-    if entity == "opportunity":
-        p = ensure_int_1_5(record.get("probability", 1), "probability")
-        i = overall_impact_from_record(record, 1)
-        obj = Opportunity(
-            id=entity_id,
-            project_id=project_id,
-            title=str(record.get("title") or "").strip() or "Untitled opportunity",
-            probability=p,
-            impact=i,
-            impact_cost=record.get("impact_cost"),
-            impact_time=record.get("impact_time"),
-            impact_scope=record.get("impact_scope"),
-            impact_quality=record.get("impact_quality"),
-            code=(str(record.get("code") or "").strip() or None),
-            description=record.get("description"),
-            category=(str(record.get("category") or "").strip() or None),
-            threat=record.get("threat"),
-            triggers=record.get("triggers"),
-            mitigation_plan=record.get("mitigation_plan"),
-            document_url=record.get("document_url"),
-            owner_user_id=parse_uuid(record["owner_user_id"], "owner_user_id")
-            if record.get("owner_user_id")
-            else None,
-            status=(str(record.get("status") or "concept").strip() or "concept"),
-            identified_at=parse_dt(record.get("identified_at"), "identified_at") or now,
-            status_changed_at=parse_dt(record.get("status_changed_at"), "status_changed_at")
-            or now,
-            response_at=parse_dt(record.get("response_at"), "response_at"),
-            occurred_at=parse_dt(record.get("occurred_at"), "occurred_at"),
-            score=compute_score(p, i),
-            created_at=parse_dt(record.get("created_at"), "created_at") or now,
-            created_by=parse_uuid(record.get("created_by") or user_id, "created_by"),
-            updated_at=now,
-            version=1,
-            is_deleted=bool(record.get("is_deleted") or False),
-        )
-        db.add(obj)
-        return obj
+    # 1. Provide shared defaults for all new objects
+    kwargs = {"id": entity_id, "version": 1, "updated_at": now, "created_at": now}
+    if entity != "assessment":
+        kwargs.update({"project_id": project_id, "created_by": user_id})
 
-    if entity == "action":
-        kind = str(record.get("kind") or "").strip()
-        if kind not in ACTION_KIND_ALLOWED:
-            raise HTTPException(status_code=400, detail="Invalid action kind")
+    # 2. Add entity-specific defaults
 
-        risk_uuid = (
-            parse_uuid(record["risk_id"], "risk_id") if record.get("risk_id") else None
-        )
-        opp_uuid = (
-            parse_uuid(record["opportunity_id"], "opportunity_id")
-            if record.get("opportunity_id")
-            else None
-        )
-        if (risk_uuid is None) == (opp_uuid is None):
-            raise HTTPException(
-                status_code=400,
-                detail="Action must target exactly one of risk_id/opportunity_id",
-            )
+    if entity in {"risk", "opportunity"}:
+        kwargs.update({"title": "Untitled", "probability": 1, "impact": 1})
 
-        obj = Action(
-            id=entity_id,
-            project_id=project_id,
-            risk_id=risk_uuid,
-            opportunity_id=opp_uuid,
-            kind=kind,
-            title=str(record.get("title") or "").strip() or "Untitled action",
-            description=record.get("description"),
-            status=str(record.get("status") or ActionStatus.open.value).strip()
-            or ActionStatus.open.value,
-            owner_user_id=parse_uuid(record["owner_user_id"], "owner_user_id")
-            if record.get("owner_user_id")
-            else None,
-            created_by=parse_uuid(record.get("created_by") or user_id, "created_by"),
-            created_at=parse_dt(record.get("created_at"), "created_at") or now,
-            updated_at=now,
-            version=1,
-            is_deleted=bool(record.get("is_deleted") or False),
-        )
+    elif entity == "action":
+        if (val_data.get("risk_id") is None) == (val_data.get("opportunity_id") is None):
+            raise HTTPException(status_code=400, detail="Action must target exactly one of risk_id/opportunity_id")
+        kwargs.update({"title": "Untitled action", "kind": "mitigation", "status": ActionStatus.open.value})
+    elif entity == "assessment":
+        if not val_data.get("risk_id"):
+            raise HTTPException(status_code=400, detail="risk_id is required")
+        kwargs.update({"assessor_user_id": user_id, "probability": 1, "impact": 1})
 
-        if obj.status not in ACTION_STATUS_ALLOWED:
-            raise HTTPException(status_code=400, detail="Invalid action status")
+    # 3. Instantiate model
+    obj = Model(**kwargs)
+    for k, v in val_data.items():
+        if hasattr(obj, k) and k not in {"base_version", "score"}:
+            setattr(obj, k, v)
 
-        db.add(obj)
-        return obj
 
-    if entity == "assessment":
-        risk_id = parse_uuid(record.get("risk_id"), "risk_id")
-        risk = (
-            db.execute(select(Risk).where(Risk.id == risk_id, Risk.project_id == project_id))
-            .scalars()
-            .first()
-        )
-        if not risk:
-            raise HTTPException(status_code=400, detail="risk_id not in project")
+    if entity in {"risk", "opportunity"}:
+        obj.impact = overall_impact_from_record(model_to_dict(obj), obj.impact)
+        obj.score = compute_score(obj.probability, obj.impact)
+    elif entity == "assessment":
+        obj.score = compute_score(obj.probability, obj.impact)
 
-        p = ensure_int_1_5(record.get("probability", 1), "probability")
-        i = ensure_int_1_5(record.get("impact", 1), "impact")
-
-        obj = RiskAssessment(
-            id=entity_id,
-            risk_id=risk_id,
-            assessor_user_id=parse_uuid(
-                record.get("assessor_user_id") or user_id, "assessor_user_id"
-            ),
-            probability=p,
-            impact=i,
-            score=compute_score(p, i),
-            notes=(record.get("notes") or ""),
-            created_at=parse_dt(record.get("created_at"), "created_at") or now,
-            updated_at=now,
-            version=1,
-            is_deleted=bool(record.get("is_deleted") or False),
-        )
-        db.add(obj)
-        return obj
-
-    raise HTTPException(status_code=400, detail="Unsupported entity")
+    db.add(obj)
+    return obj
 
 
 def _update_existing(
@@ -733,182 +532,33 @@ def _update_existing(
     record: dict[str, Any],
 ) -> None:
     now = utcnow()
-
-    if entity == "risk":
-        if "title" in record and record["title"] is not None:
-            obj.title = str(record.get("title") or "").strip() or obj.title
-        if "probability" in record and record["probability"] is not None:
-            obj.probability = ensure_int_1_5(record["probability"], "probability")
-
-        for dim in ("impact_cost", "impact_time", "impact_scope", "impact_quality"):
-            if dim in record and record[dim] is not None:
-                setattr(obj, dim, ensure_int_1_5(record[dim], dim))
-        if "impact" in record and record["impact"] is not None:
-            obj.impact = ensure_int_1_5(record["impact"], "impact")
-
-        # metadata
-        for field in (
-            "code",
-            "description",
-            "category",
-            "threat",
-            "triggers",
-            "mitigation_plan",
-            "document_url",
-        ):
-            if field in record:
-                setattr(obj, field, record.get(field))
-
-        if "owner_user_id" in record:
-            obj.owner_user_id = (
-                parse_uuid(record["owner_user_id"], "owner_user_id")
-                if record.get("owner_user_id")
-                else None
-            )
-
-        if "status" in record and record["status"] is not None:
-            new_status = str(record["status"]).strip()
-            if new_status and new_status != obj.status:
-                obj.status = new_status
-                obj.status_changed_at = now
-
-        for field in ("identified_at", "response_at", "occurred_at"):
-            if field in record:
-                setattr(obj, field, parse_dt(record.get(field), field))
-
-        obj.impact = overall_impact_from_record(model_to_dict(obj), int(getattr(obj, "impact", 1)))
-        obj.score = compute_score(obj.probability, obj.impact)
-
-        obj.updated_at = now
-        obj.version = int(obj.version) + 1
-        if "is_deleted" in record and record["is_deleted"] is not None:
-            obj.is_deleted = bool(record["is_deleted"])
-        return
-
-    if entity == "opportunity":
-        if "title" in record and record["title"] is not None:
-            obj.title = str(record.get("title") or "").strip() or obj.title
-        if "probability" in record and record["probability"] is not None:
-            obj.probability = ensure_int_1_5(record["probability"], "probability")
-
-        for dim in ("impact_cost", "impact_time", "impact_scope", "impact_quality"):
-            if dim in record and record[dim] is not None:
-                setattr(obj, dim, ensure_int_1_5(record[dim], dim))
-        if "impact" in record and record["impact"] is not None:
-            obj.impact = ensure_int_1_5(record["impact"], "impact")
-
-        for field in (
-            "code",
-            "description",
-            "category",
-            "threat",
-            "triggers",
-            "mitigation_plan",
-            "document_url",
-        ):
-            if field in record:
-                setattr(obj, field, record.get(field))
-
-        if "owner_user_id" in record:
-            obj.owner_user_id = (
-                parse_uuid(record["owner_user_id"], "owner_user_id")
-                if record.get("owner_user_id")
-                else None
-            )
-
-        if "status" in record and record["status"] is not None:
-            new_status = str(record["status"]).strip()
-            if new_status and new_status != obj.status:
-                obj.status = new_status
-                obj.status_changed_at = now
-
-        for field in ("identified_at", "response_at", "occurred_at"):
-            if field in record:
-                setattr(obj, field, parse_dt(record.get(field), field))
-
-        obj.impact = overall_impact_from_record(model_to_dict(obj), int(getattr(obj, "impact", 1)))
-        obj.score = compute_score(obj.probability, obj.impact)
-
-        obj.updated_at = now
-        obj.version = int(obj.version) + 1
-        if "is_deleted" in record and record["is_deleted"] is not None:
-            obj.is_deleted = bool(record["is_deleted"])
-        return
-
-    if entity == "action":
-        if "kind" in record and record["kind"] is not None:
-            kind = str(record.get("kind") or "").strip()
-            if kind not in ACTION_KIND_ALLOWED:
-                raise HTTPException(status_code=400, detail="Invalid action kind")
-            obj.kind = kind
-
-        for field in ("title", "description"):
-            if field in record and record[field] is not None:
-                setattr(obj, field, record[field])
-
-        if "status" in record and record["status"] is not None:
-            status = str(record["status"]).strip()
-            if status not in ACTION_STATUS_ALLOWED:
-                raise HTTPException(status_code=400, detail="Invalid action status")
-            obj.status = status
-
-        if "owner_user_id" in record:
-            obj.owner_user_id = (
-                parse_uuid(record["owner_user_id"], "owner_user_id")
-                if record.get("owner_user_id")
-                else None
-            )
-
-        if "risk_id" in record or "opportunity_id" in record:
-            risk_uuid = (
-                parse_uuid(record["risk_id"], "risk_id") if record.get("risk_id") else None
-            )
-            opp_uuid = (
-                parse_uuid(record["opportunity_id"], "opportunity_id")
-                if record.get("opportunity_id")
-                else None
-            )
-            if (risk_uuid is None) == (opp_uuid is None):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Action must target exactly one of risk_id/opportunity_id",
-                )
-            obj.risk_id = risk_uuid
-            obj.opportunity_id = opp_uuid
-
-        obj.updated_at = now
-        obj.version = int(obj.version) + 1
-        if "is_deleted" in record and record["is_deleted"] is not None:
-            obj.is_deleted = bool(record["is_deleted"])
-        return
-
+    val_data = _parse_record(entity, record)
     if entity == "assessment":
-        risk = (
-            db.execute(select(Risk).where(Risk.id == obj.risk_id, Risk.project_id == project_id))
-            .scalars()
-            .first()
-        )
+        risk = db.execute(select(Risk).where(Risk.id == obj.risk_id, Risk.project_id == project_id)).scalars().first()
         if not risk:
-            raise HTTPException(
-                status_code=400, detail="assessment no longer belongs to project"
-            )
+            raise HTTPException(status_code=400, detail="assessment no longer belongs to project")
+    elif entity == "action":
+        if "risk_id" in val_data or "opportunity_id" in val_data:
+            r_id = val_data.get("risk_id", obj.risk_id)
+            o_id = val_data.get("opportunity_id", obj.opportunity_id)
+            if (r_id is None) == (o_id is None):
+                raise HTTPException(status_code=400, detail="Action must target exactly one")
 
-        if "probability" in record and record["probability"] is not None:
-            obj.probability = ensure_int_1_5(record["probability"], "probability")
-        if "impact" in record and record["impact"] is not None:
-            obj.impact = ensure_int_1_5(record["impact"], "impact")
+    for k, v in val_data.items():
+        if hasattr(obj, k) and k not in {"base_version", "score"}:
+            if k == "status" and entity in {"risk", "opportunity"} and getattr(obj, "status", None) != v:
+                obj.status_changed_at = now
+            setattr(obj, k, v)
+
+    if entity in {"risk", "opportunity"}:
+        obj.impact = overall_impact_from_record(model_to_dict(obj), obj.impact)
         obj.score = compute_score(obj.probability, obj.impact)
-
-        if "notes" in record:
-            obj.notes = record.get("notes") or ""
-
-        obj.updated_at = now
-        obj.version = int(obj.version) + 1
-        if "is_deleted" in record and record["is_deleted"] is not None:
-            obj.is_deleted = bool(record["is_deleted"])
-        return
-
-    raise HTTPException(status_code=400, detail="Unsupported entity")
+    elif entity == "assessment":
+        obj.score = compute_score(obj.probability, obj.impact)
+    obj.updated_at = now
+    obj.version = int(obj.version) + 1
+    if "is_deleted" in record and record["is_deleted"] is not None:
+        obj.is_deleted = bool(record["is_deleted"])
 
 
 def _audit(

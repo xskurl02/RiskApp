@@ -16,13 +16,14 @@ router = APIRouter(tags=["auth"])
 
 @router.post("/register", status_code=201)
 def register(payload: RegisterIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    email_lower = str(payload.email).lower()
     existing = (
-        db.execute(select(User).where(User.email == str(payload.email))).scalars().first()
+        db.execute(select(User).where(User.email == email_lower)).scalars().first()
     )
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    user = User(email=str(payload.email), password_hash=hash_pw(payload.password), is_active=True)
+    user = User(email=email_lower, password_hash=hash_pw(payload.password), is_active=True)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -36,7 +37,8 @@ def login(
     form: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    user = db.execute(select(User).where(User.email == form.username)).scalars().first()
+    email_lower = form.username.lower()
+    user = db.execute(select(User).where(User.email == email_lower)).scalars().first()
     if not user or not user.is_active or not verify_pw(form.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"

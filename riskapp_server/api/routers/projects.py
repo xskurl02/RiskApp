@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from core.permissions import ensure_member, require_min_role
-from db import Project, ProjectMember, User, get_db
+from db import Project, ProjectMember, User, Role, get_db
 from schemas import AddMemberIn, MemberOut, ProjectCreate, ProjectOut
 
 router = APIRouter(tags=["projects"])
@@ -33,7 +33,7 @@ def create_project(
     db.commit()
     db.refresh(project)
 
-    db.add(ProjectMember(project_id=project.id, user_id=user.id, role="admin", created_at=now))
+    db.add(ProjectMember(project_id=project.id, user_id=user.id, role=Role.admin.value, created_at=now))
     db.commit()
     return project
 
@@ -75,7 +75,7 @@ def add_member(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    require_min_role(db, project_id, user.id, min_role="admin")
+    require_min_role(db, project_id, user.id, min_role=Role.admin)
 
     target = (
         db.execute(select(User).where(User.email == str(payload.user_email))).scalars().first()
@@ -145,7 +145,7 @@ def remove_member(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
-    require_min_role(db, project_id, user.id, min_role="admin")
+    require_min_role(db, project_id, user.id, min_role=Role.admin)
     m = (
         db.execute(
             select(ProjectMember).where(

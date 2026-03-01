@@ -4,12 +4,12 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import select, func, insert
+from sqlalchemy.orm import Session, aliased
 
 from auth import get_current_user
 from core.permissions import ensure_member, require_min_role
-from db import Opportunity, Risk, ScoreSnapshot, User, get_db
+from db import Opportunity, Risk, ScoreSnapshot, User, Role, get_db
 from schemas import SnapshotCreateOut, TopBatch, TopItem
 
 router = APIRouter(tags=["snapshots"])
@@ -21,63 +21,46 @@ def create_snapshot(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> SnapshotCreateOut:
-    require_min_role(db, project_id, user.id, min_role="member")
+    require_min_role(db, project_id, user.id, min_role=Role.member)
 
     batch_id = uuid.uuid4()
     captured_at = datetime.utcnow()
 
     risks = (
         db.execute(
-            select(Risk).where(Risk.project_id == project_id, Risk.is_deleted.is_(False))
+            select(Risk.id, Risk.title, Risk.probability, Risk.impact, Risk.score)
+            .where(Risk.project_id == project_id, Risk.is_deleted.is_(False))
         )
-        .scalars()
         .all()
     )
     opps = (
         db.execute(
-            select(Opportunity).where(
-                Opportunity.project_id == project_id,
-                Opportunity.is_deleted.is_(False),
-            )
+            select(Opportunity.id, Opportunity.title, Opportunity.probability, Opportunity.impact, Opportunity.score)
+            .where(Opportunity.project_id == project_id, Opportunity.is_deleted.is_(False))
         )
-        .scalars()
         .all()
     )
 
-    for r in risks:
-        db.add(
-            ScoreSnapshot(
-                id=uuid.uuid4(),
-                batch_id=batch_id,
-                captured_at=captured_at,
-                project_id=project_id,
-                kind="risk",
-                item_id=r.id,
-                title=r.title,
-                probability=r.probability,
-                impact=r.impact,
-                score=r.score,
-                created_by=user.id,
-            )
-        )
+    # FIXED MEMORY / PERFORMANCE ISSUE: Utilizing Bulk Database Insert capabilities
+    snapshots_data = []
+    for items, kind in [(risks, "risk"), (opps, "opportunity")]:
+        for item in items:
+            snapshots_data.append({
+                "id": uuid.uuid4(),
+                "batch_id": batch_id,
+                "captured_at": captured_at,
+                "project_id": project_id,
+                "kind": kind,
+                "item_id": item.id,
+                "title": item.title,
+                "probability": item.probability,
+                "impact": item.impact,
+                "score": item.score,
+                "created_by": user.id,
+            })
 
-    for o in opps:
-        db.add(
-            ScoreSnapshot(
-                id=uuid.uuid4(),
-                batch_id=batch_id,
-                captured_at=captured_at,
-                project_id=project_id,
-                kind="opportunity",
-                item_id=o.id,
-                title=o.title,
-                probability=o.probability,
-                impact=o.impact,
-                score=o.score,
-                created_by=user.id,
-            )
-        )
-
+    if snapshots_data:
+        db.execute(insert(ScoreSnapshot), snapshots_data)
     db.commit()
     return SnapshotCreateOut(
         batch_id=batch_id,
@@ -171,24 +154,41 @@ def top_history(
         )
         .all()
     )
+    # FIX N+1 Query: Fetch all top items for all relevant batches at once using Window Functions
+    if not batches:
+        return []
+        
+    batch_ids = [b[0] for b in batches]
+    
+    # Create a subquery that assigns a row number to each snapshot per batch, ordered by score desc
+    subq = (
+        select(
+            ScoreSnapshot,
+            func.row_number().over(
+                partition_by=ScoreSnapshot.batch_id,
+                order_by=(ScoreSnapshot.score.desc(), ScoreSnapshot.title.asc())
+            ).label("rn")
+        )
+        .where(
+            ScoreSnapshot.project_id == project_id,
+            ScoreSnapshot.kind == snap_kind,
+            ScoreSnapshot.batch_id.in_(batch_ids)
+        )
+        .subquery()
+    )
+    
+    # Filter by the row number to simulate the LIMIT per batch
+    aliased_snapshot = aliased(ScoreSnapshot, subq)
+    top_rows = db.execute(select(aliased_snapshot).where(subq.c.rn <= limit)).scalars().all()
+    
+    # Group rows by batch_id
+    rows_by_batch = {}
+    for row in top_rows:
+        rows_by_batch.setdefault(row.batch_id, []).append(row)
 
     out: list[TopBatch] = []
     for batch, captured_at in batches:
-        rows = (
-            db.execute(
-                select(ScoreSnapshot)
-                .where(
-                    ScoreSnapshot.project_id == project_id,
-                    ScoreSnapshot.batch_id == batch,
-                    ScoreSnapshot.kind == snap_kind,
-                )
-                .order_by(ScoreSnapshot.score.desc(), ScoreSnapshot.title.asc())
-                .limit(limit)
-            )
-            .scalars()
-            .all()
-        )
-
+        rows = rows_by_batch.get(batch, [])
         out.append(
             TopBatch(
                 batch_id=batch,
@@ -205,5 +205,4 @@ def top_history(
                 ],
             )
         )
-
     return out

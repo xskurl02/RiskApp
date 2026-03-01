@@ -89,7 +89,7 @@ def get_current_user(
     except (JWTError, ValueError) as exc:
         raise HTTPException(status_code=401, detail="Invalid token") from exc
 
-    user = db.execute(select(User).where(User.id == user_id)).scalars().first()
+    user = db.get(User, user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Inactive user")
     return user

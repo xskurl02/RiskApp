@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 import sync as sync_engine
 from auth import get_current_user
 from core.permissions import ensure_member, require_min_role
-from db import User, get_db
+from db import User, Role, get_db
 from schemas import SyncPullRequest, SyncPullResponse, SyncPushRequest, SyncPushResponse
 
 router = APIRouter(tags=["sync"])
@@ -33,7 +33,7 @@ def sync_push(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    require_min_role(db, project_id, user.id, min_role="member")
+    require_min_role(db, project_id, user.id, min_role=Role.member)
     return sync_engine.push_changes(
         db=db,
         user_id=user.id,

@@ -63,14 +63,10 @@ def apply_item_filters(
     non_deleted_statuses = [s for s in status_values if s != "deleted"]
 
     if include_deleted:
-        if len(status_values) == 1:
-            stmt = stmt.where(Model.is_deleted.is_(True))
-        elif non_deleted_statuses:
-            stmt = stmt.where(
-                or_(Model.is_deleted.is_(True), Model.status.in_(non_deleted_statuses))
-            )
-        else:
-            stmt = stmt.where(Model.is_deleted.is_(True))
+        cond = Model.is_deleted.is_(True)
+        if non_deleted_statuses:
+            cond = or_(cond, Model.status.in_(non_deleted_statuses))
+        stmt = stmt.where(cond)
     else:
         stmt = stmt.where(Model.is_deleted.is_(False))
         if non_deleted_statuses:

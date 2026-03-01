@@ -122,7 +122,7 @@ class ItemOutBase(ORMModel):
     document_url: str | None = None
 
     owner_user_id: uuid.UUID | None = None
-    status: str | None = None
+    status: RiskStatus | None = None
     identified_at: datetime | None = None
     status_changed_at: datetime | None = None
     response_at: datetime | None = None
@@ -134,30 +134,12 @@ class ItemOutBase(ORMModel):
     version: int
     is_deleted: bool
 
-
-class RiskCreate(ItemCreateBase):
-    pass
-
-
-class RiskUpdate(ItemUpdateBase):
-    pass
-
-
-class RiskOut(ItemOutBase):
-    pass
-
-
-class OpportunityCreate(ItemCreateBase):
-    pass
-
-
-class OpportunityUpdate(ItemUpdateBase):
-    pass
-
-
-class OpportunityOut(ItemOutBase):
-    pass
-
+RiskCreate = ItemCreateBase
+RiskUpdate = ItemUpdateBase
+RiskOut = ItemOutBase
+OpportunityCreate = ItemCreateBase
+OpportunityUpdate = ItemUpdateBase
+OpportunityOut = ItemOutBase
 
 class ScoreReportOut(BaseModel):
     total: int
@@ -227,10 +209,10 @@ class ActionOut(ORMModel):
     risk_id: uuid.UUID | None
     opportunity_id: uuid.UUID | None
 
-    kind: str
+    kind: ActionKind
     title: str
     description: str | None
-    status: str
+    status: ActionStatus
 
     owner_user_id: uuid.UUID | None
     created_by: uuid.UUID
@@ -246,11 +228,6 @@ class SnapshotCreateOut(BaseModel):
     captured_at: datetime
     risks: int = 0
     opportunities: int = 0
-
-
-class LatestSnapshotOut(BaseModel):
-    batch_id: uuid.UUID | None = None
-    captured_at: datetime | None = None
 
 
 class TopItem(BaseModel):
@@ -300,3 +277,32 @@ class SyncPushResponse(BaseModel):
     conflicts: list[dict] = Field(default_factory=list)
     errors: list[dict] = Field(default_factory=list)
     server_time: datetime
+
+
+# --- Sync specifické validační modely ---
+
+class SyncItemRecord(ItemUpdateBase):
+    id: uuid.UUID | None = None
+    created_at: datetime | None = None
+    created_by: uuid.UUID | None = None
+    is_deleted: bool | None = None
+    status_changed_at: datetime | None = None
+
+class SyncActionRecord(ActionUpdate):
+    id: uuid.UUID | None = None
+    risk_id: uuid.UUID | None = None
+    opportunity_id: uuid.UUID | None = None
+    created_at: datetime | None = None
+    created_by: uuid.UUID | None = None
+    is_deleted: bool | None = None
+
+class SyncAssessmentRecord(BaseModel):
+    id: uuid.UUID | None = None
+    risk_id: uuid.UUID | None = None
+    assessor_user_id: uuid.UUID | None = None
+    probability: int | None = Field(default=None, ge=1, le=5)
+    impact: int | None = Field(default=None, ge=1, le=5)
+    score: int | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+    is_deleted: bool | None = None
