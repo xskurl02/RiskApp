@@ -18,4 +18,6 @@ def recalculate_item_scores(item) -> None:
     if valid:
         item.impact = max(valid)
 
-    item.score = int(getattr(item, "probability") or 1) * int(getattr(item, "impact") or 1)
+    item.score = int(getattr(item, "probability") or 1) * int(
+        getattr(item, "impact") or 1
+    )

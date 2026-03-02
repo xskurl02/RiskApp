@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -63,21 +64,23 @@ class ItemShared(BaseModel):
     occurred_at: datetime | None = None
 
 
-class ItemCreateBase(ItemShared):
+class ItemCreate(ItemShared):
+    type: Literal["risk", "opportunity"]
     title: str
     probability: int = Field(ge=1, le=5)
     impact: int = Field(ge=1, le=5)
 
 
-class ItemUpdateBase(ItemShared):
+class ItemUpdate(ItemShared):
     base_version: int | None = None
     title: str | None = None
     probability: int | None = Field(default=None, ge=1, le=5)
     impact: int | None = Field(default=None, ge=1, le=5)
 
 
-class ItemOutBase(ItemShared, ORMModel):
+class ItemOut(ItemShared, ORMModel):
     id: uuid.UUID
+    type: Literal["risk", "opportunity"]
     project_id: uuid.UUID
     title: str
     probability: int
@@ -89,14 +92,6 @@ class ItemOutBase(ItemShared, ORMModel):
     updated_at: datetime
     version: int
     is_deleted: bool
-
-
-RiskCreate = ItemCreateBase
-RiskUpdate = ItemUpdateBase
-RiskOut = ItemOutBase
-OpportunityCreate = ItemCreateBase
-OpportunityUpdate = ItemUpdateBase
-OpportunityOut = ItemOutBase
 
 
 class ScoreReportOut(BaseModel):
@@ -118,8 +113,9 @@ class AssessmentIn(BaseModel):
     notes: str | None = None
 
 
-class AssessmentOutBase(ORMModel):
+class AssessmentOut(ORMModel):
     id: uuid.UUID
+    item_id: uuid.UUID
     assessor_user_id: uuid.UUID
     probability: int
     impact: int
@@ -130,11 +126,6 @@ class AssessmentOutBase(ORMModel):
     version: int
     is_deleted: bool
 
-class RiskAssessmentOut(AssessmentOutBase):
-    risk_id: uuid.UUID
-
-class OpportunityAssessmentOut(AssessmentOutBase):
-    opportunity_id: uuid.UUID
 
 class MatrixResponse(BaseModel):
     kind: str
@@ -145,8 +136,7 @@ class MatrixResponse(BaseModel):
 
 
 class ActionCreate(BaseModel):
-    risk_id: uuid.UUID | None = None
-    opportunity_id: uuid.UUID | None = None
+    item_id: uuid.UUID
     kind: ActionKind
     title: str
     description: str | None = None
@@ -164,8 +154,7 @@ class ActionUpdate(BaseModel):
 class ActionOut(ORMModel):
     id: uuid.UUID
     project_id: uuid.UUID
-    risk_id: uuid.UUID | None
-    opportunity_id: uuid.UUID | None
+    item_id: uuid.UUID
     kind: ActionKind
     title: str
     description: str | None
@@ -206,11 +195,10 @@ class SyncPullRequest(BaseModel):
 
 class SyncPullResponse(BaseModel):
     server_time: datetime
-    risks: list[RiskOut]
-    opportunities: list[OpportunityOut]
+    items: list[ItemOut]
     actions: list[ActionOut]
-    risk_assessments: list[RiskAssessmentOut]
-    opportunity_assessments: list[OpportunityAssessmentOut]
+    assessments: list[AssessmentOut]
+
 
 class SyncChange(BaseModel):
     change_id: uuid.UUID
@@ -236,6 +224,7 @@ class SyncPushResponse(BaseModel):
 
 # Sync payload validators (internal)
 
+
 class SyncItemRecord(ItemShared):
     id: uuid.UUID
     title: str | None = None
@@ -246,8 +235,7 @@ class SyncItemRecord(ItemShared):
 
 class SyncActionRecord(BaseModel):
     id: uuid.UUID
-    risk_id: uuid.UUID | None = None
-    opportunity_id: uuid.UUID | None = None
+    item_id: uuid.UUID | None = None
     kind: ActionKind | None = None
     title: str | None = None
     description: str | None = None
@@ -258,8 +246,7 @@ class SyncActionRecord(BaseModel):
 
 class SyncAssessmentRecord(BaseModel):
     id: uuid.UUID
-    risk_id: uuid.UUID | None = None
-    opportunity_id: uuid.UUID | None = None
+    item_id: uuid.UUID | None = None
     probability: int | None = Field(default=None, ge=1, le=5)
     impact: int | None = Field(default=None, ge=1, le=5)
     notes: str | None = None

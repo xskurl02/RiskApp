@@ -25,7 +25,9 @@ def ensure_role_at_least(role: str | Role, min_role: str | Role) -> None:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
 
-def get_member_role(db: Session, project_id: uuid.UUID, user_id: uuid.UUID) -> str | None:
+def get_member_role(
+    db: Session, project_id: uuid.UUID, user_id: uuid.UUID
+) -> str | None:
     row = db.execute(
         select(ProjectMember.role).where(
             ProjectMember.project_id == project_id,

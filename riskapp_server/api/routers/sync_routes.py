@@ -10,7 +10,12 @@ from ... import sync as sync_engine
 from ...auth import get_current_user
 from ...core.permissions import ensure_member, require_min_role
 from ...db import Role, User, get_db
-from ...schemas import SyncPullRequest, SyncPullResponse, SyncPushRequest, SyncPushResponse
+from ...schemas import (
+    SyncPullRequest,
+    SyncPullResponse,
+    SyncPushRequest,
+    SyncPushResponse,
+)
 
 router = APIRouter(tags=["sync"])
 
@@ -34,4 +39,6 @@ def sync_push(
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     require_min_role(db, project_id, user.id, min_role=Role.member)
-    return sync_engine.push_changes(db=db, user_id=user.id, project_id=project_id, changes=payload.changes)
+    return sync_engine.push_changes(
+        db=db, user_id=user.id, project_id=project_id, changes=payload.changes
+    )

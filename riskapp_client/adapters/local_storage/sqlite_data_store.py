@@ -6,15 +6,27 @@ import sqlite3
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar
 
-from riskapp_client.domain.domain_models import Project, Risk, Opportunity, Action, Assessment
 from riskapp_client.adapters.local_storage.sqlite_schema_definition import ensure_schema
-from riskapp_client.adapters.mappers.action_assessment_mapper import action_from_mapping, assessment_from_mapping
-from riskapp_client.adapters.mappers.scored_entity_mapper import scored_entity_from_mapping
+from riskapp_client.adapters.mappers.action_assessment_mapper import (
+    action_from_mapping,
+    assessment_from_mapping,
+)
+from riskapp_client.adapters.mappers.scored_entity_mapper import (
+    scored_entity_from_mapping,
+)
+from riskapp_client.domain.domain_models import (
+    Action,
+    Assessment,
+    Opportunity,
+    Project,
+    Risk,
+)
 from riskapp_client.domain.scored_entity_fields import (
     SCORED_ENTITY_DB_COLUMNS,
     SCORED_ENTITY_META_KEYS,
     SCORED_ENTITY_META_SQLITE_COLUMNS,
 )
+
 
 def utc_iso() -> str:
     return datetime.utcnow().isoformat()
@@ -26,6 +38,7 @@ def _norm_text(v: str | None) -> str | None:
         return None
     s = str(v).strip()
     return s if s else None
+
 
 ModelT = TypeVar("ModelT")
 
@@ -73,7 +86,9 @@ class LocalStore:
     def _init_schema(self) -> None:
         ensure_schema(self.conn)
 
-    def _upsert_row(self, table: str, record: Dict[str, Any], cur: Any = None, pk: str = "id") -> None:
+    def _upsert_row(
+        self, table: str, record: Dict[str, Any], cur: Any = None, pk: str = "id"
+    ) -> None:
         """Generic upsert that eliminates duplicate SQL strings."""
         cols = list(record.keys())
         placeholders = ", ".join(["?"] * len(cols))
@@ -86,11 +101,11 @@ class LocalStore:
     def upsert_projects(self, projects: List[Project]) -> None:
         cur = self.conn.cursor()
         for p in projects:
-            self._upsert_row("projects", {
-                "id": p.id, 
-                "name": p.name, 
-                "description": p.description or ""
-            }, cur)
+            self._upsert_row(
+                "projects",
+                {"id": p.id, "name": p.name, "description": p.description or ""},
+                cur,
+            )
         self.conn.commit()
 
     def list_actions(self, project_id: str) -> List[Action]:
@@ -104,7 +119,7 @@ class LocalStore:
             (project_id,),
         ).fetchall()
         return [action_from_mapping(r) for r in rows]
-    
+
     def _pending_outbox_ids(self, project_id: str, *, entity: str) -> set[str]:
         rows = self.conn.execute(
             "SELECT entity_id FROM outbox WHERE project_id=? AND entity=? AND status='pending';",
@@ -113,7 +128,9 @@ class LocalStore:
         return {str(r["entity_id"]) for r in rows}
 
     def _get_action_row(self, action_id: str) -> Optional[sqlite3.Row]:
-        return self.conn.execute("SELECT * FROM actions WHERE id=?;", (action_id,)).fetchone()
+        return self.conn.execute(
+            "SELECT * FROM actions WHERE id=?;", (action_id,)
+        ).fetchone()
 
     def get_action_project_and_version(self, action_id: str) -> Tuple[str, int]:
         r = self._get_action_row(action_id)
@@ -139,24 +156,33 @@ class LocalStore:
         dirty: int = 1,
     ) -> None:
         existing = self._get_action_row(action_id)
-        self._upsert_row("actions", {
-            "id": action_id,
-            "project_id": project_id,
-            "risk_id": risk_id,
-            "opportunity_id": opportunity_id,
-            "kind": kind,
-            "title": title,
-            "description": description or "",
-            "status": status or "open",
-            "owner_user_id": owner_user_id,
-            "version": int(version if version is not None else (existing["version"] if existing else 0)),
-            "is_deleted": int(is_deleted if is_deleted is not None else (existing["is_deleted"] if existing else 0)),
-            "updated_at": str(updated_at if updated_at is not None else (existing["updated_at"] if existing else "")),
-            "dirty": int(dirty)
-        })
+
+        def _fallback(val, key, default):
+            return val if val is not None else (existing[key] if existing else default)
+
+        self._upsert_row(
+            "actions",
+            {
+                "id": action_id,
+                "project_id": project_id,
+                "risk_id": risk_id,
+                "opportunity_id": opportunity_id,
+                "kind": kind,
+                "title": title,
+                "description": description or "",
+                "status": status or "open",
+                "owner_user_id": owner_user_id,
+                "version": int(_fallback(version, "version", 0)),
+                "is_deleted": int(_fallback(is_deleted, "is_deleted", 0)),
+                "updated_at": str(_fallback(updated_at, "updated_at", "")),
+                "dirty": int(dirty),
+            },
+        )
         self.conn.commit()
 
-    def apply_pull_actions(self, project_id: str, server_actions: List[Dict[str, Any]]) -> None:
+    def apply_pull_actions(
+        self, project_id: str, server_actions: List[Dict[str, Any]]
+    ) -> None:
         pending_ids = self._pending_outbox_ids(project_id, entity="action")
         cur = self.conn.cursor()
         for raw in server_actions:
@@ -171,7 +197,7 @@ class LocalStore:
                 )
                 continue
 
-            self._upsert_row("actions", {
+            record = {
                 "id": str(action.id),
                 "project_id": project_id,
                 "risk_id": action.risk_id,
@@ -184,23 +210,30 @@ class LocalStore:
                 "version": int(action.version),
                 "is_deleted": 1 if bool(action.is_deleted) else 0,
                 "updated_at": str(action.updated_at or ""),
-                "dirty": 0
-            }, cur)
+                "dirty": 0,
+            }
+            self._upsert_row("actions", record, cur)
 
         self.conn.commit()
 
     def list_projects(self) -> List[Project]:
-        rows = self.conn.execute("SELECT id, name, description FROM projects ORDER BY name;").fetchall()
-        return [Project(id=r["id"], name=r["name"], description=r["description"]) for r in rows]
+        rows = self.conn.execute(
+            "SELECT id, name, description FROM projects ORDER BY name;"
+        ).fetchall()
+        return [
+            Project(id=r["id"], name=r["name"], description=r["description"])
+            for r in rows
+        ]
 
     def get_meta(self, key: str) -> Optional[str]:
-        row = self.conn.execute("SELECT value FROM meta WHERE key=?;", (key,)).fetchone()
+        row = self.conn.execute(
+            "SELECT value FROM meta WHERE key=?;", (key,)
+        ).fetchone()
         return str(row["value"]) if row else None
 
     def set_meta(self, key: str, value: str) -> None:
         self._upsert_row("meta", {"key": key, "value": value}, pk="key")
         self.conn.commit()
-    
 
     def _next_code(self, project_id: str, *, table: str, prefix: str) -> str:
         """Best-effort local code generator (e.g. R-001 / O-001).
@@ -242,7 +275,9 @@ class LocalStore:
         if table not in _VALID_SCORED_TABLES:
             raise ValueError(f"Invalid scored-entity table: {table!r}")
 
-    def _list_scored_entities(self, project_id: str, *, table: str, model_cls: Type[ModelT]) -> List[ModelT]:
+    def _list_scored_entities(
+        self, project_id: str, *, table: str, model_cls: Type[ModelT]
+    ) -> List[ModelT]:
         self._assert_scored_table(table)
         cols = ", ".join(SCORED_ENTITY_DB_COLUMNS)
         rows = self.conn.execute(
@@ -258,9 +293,13 @@ class LocalStore:
 
     def _get_scored_row(self, table: str, entity_id: str) -> Optional[sqlite3.Row]:
         self._assert_scored_table(table)
-        return self.conn.execute(f"SELECT * FROM {table} WHERE id=?;", (entity_id,)).fetchone()
+        return self.conn.execute(
+            f"SELECT * FROM {table} WHERE id=?;", (entity_id,)
+        ).fetchone()
 
-    def _get_scored_project_and_version(self, table: str, entity_id: str, *, label: str) -> Tuple[str, int]:
+    def _get_scored_project_and_version(
+        self, table: str, entity_id: str, *, label: str
+    ) -> Tuple[str, int]:
         row = self._get_scored_row(table, entity_id)
         if not row:
             raise KeyError(f"{label} not found in local store")
@@ -296,14 +335,27 @@ class LocalStore:
         self._assert_scored_table(table)
         existing = self._get_scored_row(table, entity_id)
 
-        v = int(version if version is not None else (existing["version"] if existing else 0))
-        is_del = int(is_deleted if is_deleted is not None else (existing["is_deleted"] if existing else 0))
-        upd = str(updated_at if updated_at is not None else (existing["updated_at"] if existing else ""))
+        def _fallback(val, key, default):
+            return val if val is not None else (existing[key] if existing else default)
 
+        v = int(_fallback(version, "version", 0))
+        is_del = int(_fallback(is_deleted, "is_deleted", 0))
+        upd = str(_fallback(updated_at, "updated_at", ""))
         m = self._norm_scored_meta(meta)
         # Ensure a stable status value even if the server omitted it.
         if not m.get("status"):
             m["status"] = "concept"
+
+        # Lokálny prepočet dopadu (Impact) z čiastkových metrík pre správny offline režim
+        dims = [
+            m.get("impact_cost"),
+            m.get("impact_time"),
+            m.get("impact_scope"),
+            m.get("impact_quality"),
+        ]
+        valid_dims = [int(x) for x in dims if x is not None]
+        if valid_dims:
+            impact = max(valid_dims)
 
         record: Dict[str, Any] = {
             "id": entity_id,
@@ -371,6 +423,7 @@ class LocalStore:
             self._upsert_row(table, record, cur)
 
         self.conn.commit()
+
     # --------- Risks ---------
 
     def list_risks(self, project_id: str) -> List[Risk]:
@@ -413,16 +466,22 @@ class LocalStore:
     def mark_risk_clean(self, risk_id: str) -> None:
         self.conn.execute("UPDATE risks SET dirty=0 WHERE id=?;", (risk_id,))
         self.conn.commit()
-    
+
     # --------- Opportunities ---------
     def list_opportunities(self, project_id: str) -> List[Opportunity]:
-        return self._list_scored_entities(project_id, table="opportunities", model_cls=Opportunity)
+        return self._list_scored_entities(
+            project_id, table="opportunities", model_cls=Opportunity
+        )
 
     def get_opportunity_row(self, opportunity_id: str) -> sqlite3.Row | None:
         return self._get_scored_row("opportunities", opportunity_id)
 
-    def get_opportunity_project_and_version(self, opportunity_id: str) -> Tuple[str, int]:
-        return self._get_scored_project_and_version("opportunities", opportunity_id, label="opportunity")
+    def get_opportunity_project_and_version(
+        self, opportunity_id: str
+    ) -> Tuple[str, int]:
+        return self._get_scored_project_and_version(
+            "opportunities", opportunity_id, label="opportunity"
+        )
 
     def upsert_local_opportunity(
         self,
@@ -488,39 +547,46 @@ class LocalStore:
         dirty: int,
     ) -> None:
         score = int(probability) * int(impact)
-        self._upsert_row("assessments", {
-            "id": assessment_id,
-            "project_id": project_id,
-            "risk_id": risk_id,
-            "assessor_user_id": assessor_user_id,
-            "probability": int(probability),
-            "impact": int(impact),
-            "score": score,
-            "notes": notes or "",
-            "version": int(version),
-            "is_deleted": 1 if is_deleted else 0,
-            "updated_at": updated_at,
-            "dirty": int(dirty)
-        })
+        self._upsert_row(
+            "assessments",
+            {
+                "id": assessment_id,
+                "project_id": project_id,
+                "risk_id": risk_id,
+                "assessor_user_id": assessor_user_id,
+                "probability": int(probability),
+                "impact": int(impact),
+                "score": score,
+                "notes": notes or "",
+                "version": int(version),
+                "is_deleted": 1 if is_deleted else 0,
+                "updated_at": updated_at,
+                "dirty": int(dirty),
+            },
+        )
         self.conn.commit()
 
     # --------- Sync state ---------
 
     def get_last_server_time(self, project_id: str) -> str:
-        row = self.conn.execute("SELECT last_server_time FROM sync_state WHERE project_id=?;", (project_id,)).fetchone()
+        row = self.conn.execute(
+            "SELECT last_server_time FROM sync_state WHERE project_id=?;", (project_id,)
+        ).fetchone()
         return str(row["last_server_time"]) if row else "1970-01-01T00:00:00"
 
     def set_last_server_time(self, project_id: str, server_time: str) -> None:
         self._upsert_row(
-            "sync_state", 
-            {"project_id": project_id, "last_server_time": server_time}, 
-            pk="project_id"
+            "sync_state",
+            {"project_id": project_id, "last_server_time": server_time},
+            pk="project_id",
         )
         self.conn.commit()
 
     # --------- Apply pull ---------
 
-    def apply_pull_risks(self, project_id: str, server_risks: List[Dict[str, Any]]) -> None:
+    def apply_pull_risks(
+        self, project_id: str, server_risks: List[Dict[str, Any]]
+    ) -> None:
         self._apply_pull_scored_entities(
             project_id,
             server_risks,
@@ -528,7 +594,9 @@ class LocalStore:
             outbox_entity="risk",
         )
 
-    def apply_pull_opportunities(self, project_id: str, server_opps: List[Dict[str, Any]]) -> None:
+    def apply_pull_opportunities(
+        self, project_id: str, server_opps: List[Dict[str, Any]]
+    ) -> None:
         self._apply_pull_scored_entities(
             project_id,
             server_opps,
@@ -536,9 +604,11 @@ class LocalStore:
             outbox_entity="opportunity",
         )
 
-    def apply_pull_assessments(self, project_id: str, server_assessments: List[Dict[str, Any]]) -> None:
+    def apply_pull_assessments(
+        self, project_id: str, server_assessments: List[Dict[str, Any]]
+    ) -> None:
         pending_ids = self._pending_outbox_ids(project_id, entity="assessment")
- 
+
         cur = self.conn.cursor()
         for raw in server_assessments:
             assessment = assessment_from_mapping(raw)
@@ -553,7 +623,7 @@ class LocalStore:
                 )
                 continue
 
-            self._upsert_row("assessments", {
+            record = {
                 "id": str(assessment.id),
                 "project_id": project_id,
                 "risk_id": str(assessment.risk_id),
@@ -565,7 +635,8 @@ class LocalStore:
                 "version": ver,
                 "is_deleted": is_del,
                 "updated_at": upd,
-                "dirty": 0
-            }, cur)
+                "dirty": 0,
+            }
+            self._upsert_row("assessments", record, cur)
 
         self.conn.commit()

@@ -1,19 +1,31 @@
 from __future__ import annotations
 
-import os
-import logging
-import ssl
 import base64
 import json
+import logging
+import os
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from typing import Dict, List, Optional
 
-from riskapp_client.domain.domain_models import Project, Risk, Opportunity, Action, Assessment, Member
-from riskapp_client.adapters.mappers.scored_entity_mapper import scored_entity_from_mapping
-from riskapp_client.adapters.mappers.action_assessment_mapper import action_from_mapping, assessment_from_mapping
+from riskapp_client.adapters.mappers.action_assessment_mapper import (
+    action_from_mapping,
+    assessment_from_mapping,
+)
+from riskapp_client.adapters.mappers.scored_entity_mapper import (
+    scored_entity_from_mapping,
+)
+from riskapp_client.domain.domain_models import (
+    Action,
+    Assessment,
+    Member,
+    Opportunity,
+    Project,
+    Risk,
+)
 from riskapp_client.domain.scored_entity_fields import SCORED_ENTITY_META_KEYS
 from riskapp_client.utils.url_validation_helpers import UrlPolicy, validate_base_url
 
@@ -46,80 +58,166 @@ class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
             )
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
+
 def _jwt_sub(token: str) -> Optional[str]:
     try:
         parts = token.split(".")
         if len(parts) < 2:
             return None
         payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
-        data = json.loads(base64.urlsafe_b64decode(payload_b64.encode("ascii")).decode("utf-8"))
+        data = json.loads(
+            base64.urlsafe_b64decode(payload_b64.encode("ascii")).decode("utf-8")
+        )
         return str(data.get("sub")) if data.get("sub") else None
     except Exception:
         return None
 
+
 class FakeBackend:
     def __init__(self) -> None:
         p1 = Project(id=str(uuid.uuid4()), name="MPR Project", description="Fake data")
-        p2 = Project(id=str(uuid.uuid4()), name="Demo Project", description="More fake data")
+        p2 = Project(
+            id=str(uuid.uuid4()), name="Demo Project", description="More fake data"
+        )
         self.projects: List[Project] = [p1, p2]
 
         self.risks: Dict[str, List[Risk]] = {
             p1.id: [
-                Risk(id=str(uuid.uuid4()), project_id=p1.id, title="Critical outage", probability=5, impact=5),
-                Risk(id=str(uuid.uuid4()), project_id=p1.id, title="Supplier delay", probability=4, impact=5),
-                Risk(id=str(uuid.uuid4()), project_id=p1.id, title="Scope creep", probability=3, impact=4),
+                Risk(
+                    id=str(uuid.uuid4()),
+                    project_id=p1.id,
+                    title="Critical outage",
+                    probability=5,
+                    impact=5,
+                ),
+                Risk(
+                    id=str(uuid.uuid4()),
+                    project_id=p1.id,
+                    title="Supplier delay",
+                    probability=4,
+                    impact=5,
+                ),
+                Risk(
+                    id=str(uuid.uuid4()),
+                    project_id=p1.id,
+                    title="Scope creep",
+                    probability=3,
+                    impact=4,
+                ),
             ],
             p2.id: [
-                Risk(id=str(uuid.uuid4()), project_id=p2.id, title="Minor bug", probability=2, impact=2),
-            ],
-        }
-        
-        self.opportunities: Dict[str, List[Opportunity]] = {
-            p1.id: [
-                Opportunity(id=str(uuid.uuid4()), project_id=p1.id, title="Automation savings", probability=3, impact=4),
-                Opportunity(id=str(uuid.uuid4()), project_id=p1.id, title="Early delivery bonus", probability=2, impact=5),
-            ],
-            p2.id: [
-                Opportunity(id=str(uuid.uuid4()), project_id=p2.id, title="Reuse components", probability=4, impact=3),
+                Risk(
+                    id=str(uuid.uuid4()),
+                    project_id=p2.id,
+                    title="Minor bug",
+                    probability=2,
+                    impact=2,
+                ),
             ],
         }
 
+        self.opportunities: Dict[str, List[Opportunity]] = {
+            p1.id: [
+                Opportunity(
+                    id=str(uuid.uuid4()),
+                    project_id=p1.id,
+                    title="Automation savings",
+                    probability=3,
+                    impact=4,
+                ),
+                Opportunity(
+                    id=str(uuid.uuid4()),
+                    project_id=p1.id,
+                    title="Early delivery bonus",
+                    probability=2,
+                    impact=5,
+                ),
+            ],
+            p2.id: [
+                Opportunity(
+                    id=str(uuid.uuid4()),
+                    project_id=p2.id,
+                    title="Reuse components",
+                    probability=4,
+                    impact=3,
+                ),
+            ],
+        }
 
     def list_projects(self) -> List[Project]:
         return list(self.projects)
 
     def list_risks(self, project_id: str) -> List[Risk]:
-        return sorted(self.risks.get(project_id, []), key=lambda r: (r.score, r.title), reverse=True)
+        return sorted(
+            self.risks.get(project_id, []),
+            key=lambda r: (r.score, r.title),
+            reverse=True,
+        )
 
-    def create_risk(self, project_id: str, title: str, probability: int, impact: int) -> Risk:
-        r = Risk(id=str(uuid.uuid4()), project_id=project_id, title=title, probability=probability, impact=impact)
+    def create_risk(
+        self, project_id: str, title: str, probability: int, impact: int
+    ) -> Risk:
+        r = Risk(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            title=title,
+            probability=probability,
+            impact=impact,
+        )
         self.risks.setdefault(project_id, []).append(r)
         return r
 
-    def update_risk(self, risk_id: str, title: str, probability: int, impact: int) -> Risk:
+    def update_risk(
+        self, risk_id: str, title: str, probability: int, impact: int
+    ) -> Risk:
         for pid, lst in self.risks.items():
             for i, r in enumerate(lst):
                 if r.id == risk_id:
-                    lst[i] = Risk(id=r.id, project_id=r.project_id, title=title, probability=probability, impact=impact)
+                    lst[i] = Risk(
+                        id=r.id,
+                        project_id=r.project_id,
+                        title=title,
+                        probability=probability,
+                        impact=impact,
+                    )
                     return lst[i]
         raise KeyError("risk not found")
-    
-    def list_opportunities(self, project_id: str) -> List[Opportunity]:
-        return sorted(self.opportunities.get(project_id, []), key=lambda o: (o.score, o.title), reverse=True)
 
-    def create_opportunity(self, project_id: str, title: str, probability: int, impact: int) -> Opportunity:
-        o = Opportunity(id=str(uuid.uuid4()), project_id=project_id, title=title, probability=probability, impact=impact)
+    def list_opportunities(self, project_id: str) -> List[Opportunity]:
+        return sorted(
+            self.opportunities.get(project_id, []),
+            key=lambda o: (o.score, o.title),
+            reverse=True,
+        )
+
+    def create_opportunity(
+        self, project_id: str, title: str, probability: int, impact: int
+    ) -> Opportunity:
+        o = Opportunity(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            title=title,
+            probability=probability,
+            impact=impact,
+        )
         self.opportunities.setdefault(project_id, []).append(o)
         return o
 
-    def update_opportunity(self, opportunity_id: str, title: str, probability: int, impact: int) -> Opportunity:
+    def update_opportunity(
+        self, opportunity_id: str, title: str, probability: int, impact: int
+    ) -> Opportunity:
         for pid, lst in self.opportunities.items():
             for i, o in enumerate(lst):
                 if o.id == opportunity_id:
-                    lst[i] = Opportunity(id=o.id, project_id=o.project_id, title=title, probability=probability, impact=impact)
+                    lst[i] = Opportunity(
+                        id=o.id,
+                        project_id=o.project_id,
+                        title=title,
+                        probability=probability,
+                        impact=impact,
+                    )
                     return lst[i]
         raise KeyError("opportunity not found")
-
 
 
 class ApiError(RuntimeError):
@@ -181,6 +279,7 @@ class ApiBackend:
         self._action_to_project: Dict[str, str] = {}
         self._action_version: Dict[str, int] = {}
         self._login(password)
+
     def _req(
         self,
         method: str,
@@ -227,7 +326,12 @@ class ApiBackend:
 
         try:
             with self._opener.open(req, timeout=self.timeout_s) as resp:
-                content_type = (resp.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
+                content_type = (
+                    (resp.headers.get("Content-Type") or "")
+                    .split(";", 1)[0]
+                    .strip()
+                    .lower()
+                )
                 raw_bytes = resp.read(_MAX_RESPONSE_BYTES + 1)
                 if len(raw_bytes) > _MAX_RESPONSE_BYTES:
                     raise ApiError(0, "Response too large")
@@ -250,7 +354,6 @@ class ApiBackend:
         except urllib.error.URLError as exc:
             raise ApiError(0, f"Cannot reach server: {exc}") from exc
 
-
     def _login(self, password: str) -> None:
         j = self._req(
             "POST",
@@ -265,7 +368,11 @@ class ApiBackend:
         self.user_id = _jwt_sub(token)
 
     def _to_project(self, j) -> Project:
-        return Project(id=str(j["id"]), name=j.get("name", ""), description=j.get("description") or "")
+        return Project(
+            id=str(j["id"]),
+            name=j.get("name", ""),
+            description=j.get("description") or "",
+        )
 
     def _to_risk(self, j) -> Risk:
         rid = str(j["id"])
@@ -279,7 +386,7 @@ class ApiBackend:
                 pass
 
         return scored_entity_from_mapping(j, model_cls=Risk)
-    
+
     def _to_opportunity(self, j) -> Opportunity:
         oid = str(j["id"])
         pid = str(j["project_id"])
@@ -293,7 +400,6 @@ class ApiBackend:
 
         return scored_entity_from_mapping(j, model_cls=Opportunity)
 
-
     def _to_action(self, j) -> Action:
         action = action_from_mapping(j)
         aid = str(action.id)
@@ -301,12 +407,14 @@ class ApiBackend:
         self._action_to_project[aid] = pid
 
         try:
-            self._action_version[aid] = int(getattr(action, 'version', 0) or 0)
+            self._action_version[aid] = int(getattr(action, "version", 0) or 0)
         except Exception:
             pass
         return action
 
-    def _build_scored_payload(self, title: str, probability: int, impact: int, meta: dict) -> dict:
+    def _build_scored_payload(
+        self, title: str, probability: int, impact: int, meta: dict
+    ) -> dict:
         """Helper to build consistent JSON payload for Risks and Opportunities."""
         body = {"title": title, "probability": int(probability), "impact": int(impact)}
         for k in SCORED_ENTITY_META_KEYS:
@@ -315,19 +423,32 @@ class ApiBackend:
                 body[k] = v
         return body
 
+    def _build_list_qs(self, **kwargs) -> str:
+        """Helper na generovanie URL query stringu bez None hodnôt."""
+        params = {
+            k: str(int(v)) if isinstance(v, bool) else str(v)
+            for k, v in kwargs.items()
+            if v is not None
+        }
+        return urllib.parse.urlencode(params)
+
     def list_projects(self) -> List[Project]:
         j = self._req("GET", "/projects")
         projects = [self._to_project(x) for x in (j or [])]
         if not projects and self.auto_create_project:
-            created = self._req("POST", "/projects", json_body={"name": "MPR Project", "description": "auto-created"})
+            created = self._req(
+                "POST",
+                "/projects",
+                json_body={"name": "MPR Project", "description": "auto-created"},
+            )
             if created:
                 projects = [self._to_project(created)]
         return projects
 
     def _to_assessment(self, j) -> Assessment:
         return assessment_from_mapping(j)
-    
-    #--- Opportunities ---
+
+    # --- Opportunities ---
 
     def list_opportunities(
         self,
@@ -340,58 +461,68 @@ class ApiBackend:
         category: Optional[str] = None,
         owner_user_id: Optional[str] = None,
         from_date: Optional[str] = None,  # "YYYY-MM-DD"
-        to_date: Optional[str] = None,    # "YYYY-MM-DD"
+        to_date: Optional[str] = None,  # "YYYY-MM-DD"
     ) -> List[Opportunity]:
-        params: Dict[str, str] = {}
+        qs = self._build_list_qs(
+            search=search,
+            min_score=min_score,
+            max_score=max_score,
+            status=status,
+            category=category,
+            owner_user_id=owner_user_id,
+            from_date=from_date,
+            to_date=to_date,
+        )
 
-        if search:
-            params["search"] = search
-        if min_score is not None:
-            params["min_score"] = str(int(min_score))
-        if max_score is not None:
-            params["max_score"] = str(int(max_score))
-        if status:
-            params["status"] = status
-        if category:
-            params["category"] = category
-        if owner_user_id:
-            params["owner_user_id"] = owner_user_id
-        if from_date:
-            params["from_date"] = from_date
-        if to_date:
-            params["to_date"] = to_date
-
-        qs = urllib.parse.urlencode(params)
         path = f"/projects/{project_id}/opportunities" + (f"?{qs}" if qs else "")
         j = self._req("GET", path)
         return [self._to_opportunity(x) for x in (j or [])]
 
-    def create_opportunity(self, project_id: str, *, title: str, probability: int, impact: int, **meta) -> Opportunity:
+    def create_opportunity(
+        self, project_id: str, *, title: str, probability: int, impact: int, **meta
+    ) -> Opportunity:
         body = self._build_scored_payload(title, probability, impact, meta)
         j = self._req("POST", f"/projects/{project_id}/opportunities", json_body=body)
         return self._to_opportunity(j)
 
-    def update_opportunity(self, opportunity_id: str, *, title: str, probability: int, impact: int, **meta) -> Opportunity:
+    def update_opportunity(
+        self, opportunity_id: str, *, title: str, probability: int, impact: int, **meta
+    ) -> Opportunity:
         pid = self._opp_to_project.get(opportunity_id)
         if not pid:
-            raise KeyError("Unknown opportunity_id (select the project and refresh first)")
+            raise KeyError(
+                "Unknown opportunity_id (select the project and refresh first)"
+            )
         body = self._build_scored_payload(title, probability, impact, meta)
 
         if opportunity_id in self._opp_version:
             body["base_version"] = int(self._opp_version[opportunity_id])
 
-        j = self._req("PATCH", f"/projects/{pid}/opportunities/{opportunity_id}", json_body=body)
+        j = self._req(
+            "PATCH", f"/projects/{pid}/opportunities/{opportunity_id}", json_body=body
+        )
         return self._to_opportunity(j)
 
     def list_assessments(self, project_id: str, risk_id: str) -> List[Assessment]:
         j = self._req("GET", f"/projects/{project_id}/risks/{risk_id}/assessments")
         return [self._to_assessment(x) for x in (j or [])]
 
-    def upsert_my_assessment(self, project_id: str, risk_id: str, probability: int, impact: int, notes: Optional[str] = None) -> Assessment:
+    def upsert_my_assessment(
+        self,
+        project_id: str,
+        risk_id: str,
+        probability: int,
+        impact: int,
+        notes: Optional[str] = None,
+    ) -> Assessment:
         j = self._req(
             "PUT",
             f"/projects/{project_id}/risks/{risk_id}/assessment",
-            json_body={"probability": int(probability), "impact": int(impact), "notes": (notes or "")},
+            json_body={
+                "probability": int(probability),
+                "impact": int(impact),
+                "notes": (notes or ""),
+            },
         )
         return self._to_assessment(j)
 
@@ -408,40 +539,35 @@ class ApiBackend:
         status: Optional[str] = None,
         category: Optional[str] = None,
         owner_user_id: Optional[str] = None,
-        from_date: Optional[str] = None,  # "YYYY-MM-DD" (or pass a date and .isoformat() before calling)
-        to_date: Optional[str] = None,    # "YYYY-MM-DD"
+        from_date: Optional[
+            str
+        ] = None,  # "YYYY-MM-DD" (or pass a date and .isoformat() before calling)
+        to_date: Optional[str] = None,  # "YYYY-MM-DD"
     ) -> List["Risk"]:
-        params: Dict[str, str] = {}
-
-        if search:
-            params["search"] = search
-        if min_score is not None:
-            params["min_score"] = str(int(min_score))
-        if max_score is not None:
-            params["max_score"] = str(int(max_score))
-        if status:
-            params["status"] = status
-        if category:
-            params["category"] = category
-        if owner_user_id:
-            params["owner_user_id"] = owner_user_id
-        if from_date:
-            params["from_date"] = from_date
-        if to_date:
-            params["to_date"] = to_date
-
-        qs = urllib.parse.urlencode(params)
+        qs = self._build_list_qs(
+            search=search,
+            min_score=min_score,
+            max_score=max_score,
+            status=status,
+            category=category,
+            owner_user_id=owner_user_id,
+            from_date=from_date,
+            to_date=to_date,
+        )
         path = f"/projects/{project_id}/risks" + (f"?{qs}" if qs else "")
         j = self._req("GET", path)
         return [self._to_risk(x) for x in (j or [])]
 
-    def create_risk(self, project_id: str, *, title: str, probability: int, impact: int, **meta) -> Risk:
+    def create_risk(
+        self, project_id: str, *, title: str, probability: int, impact: int, **meta
+    ) -> Risk:
         body = self._build_scored_payload(title, probability, impact, meta)
         j = self._req("POST", f"/projects/{project_id}/risks", json_body=body)
         return self._to_risk(j)
 
-
-    def update_risk(self, risk_id: str, *, title: str, probability: int, impact: int, **meta) -> Risk:
+    def update_risk(
+        self, risk_id: str, *, title: str, probability: int, impact: int, **meta
+    ) -> Risk:
         pid = self._risk_to_project.get(risk_id)
         if not pid:
             raise KeyError("Unknown risk_id (select the project and refresh first)")
@@ -466,10 +592,10 @@ class ApiBackend:
             f"/projects/{project_id}/sync/push",
             json_body={"project_id": project_id, "changes": changes},
         )
-    
+
     def create_snapshot(self, project_id: str):
         return self._req("POST", f"/projects/{project_id}/snapshots")
-    
+
     def latest_snapshot(self, project_id: str, *, kind: str = "risks"):
         qs = urllib.parse.urlencode({"kind": kind})
         return self._req("GET", f"/projects/{project_id}/snapshots/latest?{qs}")
@@ -555,22 +681,28 @@ class ApiBackend:
 
         qs = urllib.parse.urlencode(params)
         return self._req("GET", f"/projects/{project_id}/top-history?{qs}")
-    
+
     # --- Members / roles ---
     def list_members(self, project_id: str) -> List[Member]:
         j = self._req("GET", f"/projects/{project_id}/members")
         out: List[Member] = []
-        for m in (j or []):
-            out.append(Member(
-                user_id=str(m.get("user_id") or ""),
-                email=str(m.get("email") or ""),
-                role=str(m.get("role") or ""),
-                created_at=str(m.get("created_at") or "") or None,
-            ))
+        for m in j or []:
+            out.append(
+                Member(
+                    user_id=str(m.get("user_id") or ""),
+                    email=str(m.get("email") or ""),
+                    role=str(m.get("role") or ""),
+                    created_at=str(m.get("created_at") or "") or None,
+                )
+            )
         return out
 
     def add_member(self, project_id: str, *, user_email: str, role: str) -> None:
-        self._req("POST", f"/projects/{project_id}/members", json_body={"user_email": user_email, "role": role})
+        self._req(
+            "POST",
+            f"/projects/{project_id}/members",
+            json_body={"user_email": user_email, "role": role},
+        )
 
     def remove_member(self, project_id: str, *, member_user_id: str) -> None:
         self._req("DELETE", f"/projects/{project_id}/members/{member_user_id}")

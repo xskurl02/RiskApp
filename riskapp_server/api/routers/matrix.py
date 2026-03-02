@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ...auth import get_current_user
 from ...core.permissions import ensure_member
-from ...db import Opportunity, Risk, User, get_db
+from ...db import Item, User, get_db
 from ...schemas import MatrixResponse
 
 router = APIRouter(tags=["matrix"])
@@ -25,7 +25,9 @@ def matrix(
 
     k = (kind or "").strip().lower()
     if k not in {"risk", "opportunity", "both"}:
-        raise HTTPException(status_code=400, detail="kind must be risk|opportunity|both")
+        raise HTTPException(
+            status_code=400, detail="kind must be risk|opportunity|both"
+        )
 
     p_axis = list(range(1, 6))
     i_axis = list(range(1, 6))
@@ -36,17 +38,27 @@ def matrix(
     risks = blank() if k in {"risk", "both"} else None
     opps = blank() if k in {"opportunity", "both"} else None
 
-    def fill(Model, out):
+    def fill(item_type: str, out):
         if out is None:
             return
         for p, i, c in db.execute(
-            select(Model.probability, Model.impact, func.count(Model.id))
-            .where(Model.project_id == project_id, Model.is_deleted.is_(False))
-            .group_by(Model.probability, Model.impact)
+            select(Item.probability, Item.impact, func.count(Item.id))
+            .where(
+                Item.project_id == project_id,
+                Item.is_deleted.is_(False),
+                Item.type == item_type,
+            )
+            .group_by(Item.probability, Item.impact)
         ).all():
             out[p - 1][i - 1] = c
 
-    fill(Risk, risks)
-    fill(Opportunity, opps)
+    fill("risk", risks)
+    fill("opportunity", opps)
 
-    return MatrixResponse(kind=k, probability_axis=p_axis, impact_axis=i_axis, risks=risks, opportunities=opps)
+    return MatrixResponse(
+        kind=k,
+        probability_axis=p_axis,
+        impact_axis=i_axis,
+        risks=risks,
+        opportunities=opps,
+    )

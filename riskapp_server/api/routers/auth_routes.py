@@ -25,7 +25,11 @@ def register(payload: RegisterIn, db: Session = Depends(get_db)) -> dict[str, An
     db.commit()
     db.refresh(user)
 
-    return {"user_id": str(user.id), "access_token": create_token(str(user.id)), "token_type": "bearer"}
+    return {
+        "user_id": str(user.id),
+        "access_token": create_token(str(user.id)),
+        "token_type": "bearer",
+    }
 
 
 @router.post("/login")
@@ -35,7 +39,13 @@ def login(
 ) -> dict[str, Any]:
     email = form.username.lower()
     user = db.execute(select(User).where(User.email == email)).scalars().first()
-    if not user or not user.is_active or not verify_pw(form.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if (
+        not user
+        or not user.is_active
+        or not verify_pw(form.password, user.password_hash)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
+        )
 
     return {"access_token": create_token(str(user.id)), "token_type": "bearer"}

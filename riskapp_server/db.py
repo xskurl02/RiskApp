@@ -8,7 +8,6 @@ from enum import Enum
 
 from sqlalchemy import (
     Boolean,
-    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -28,7 +27,9 @@ def utcnow() -> datetime:
 
 
 class Base(DeclarativeBase):
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
 
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
@@ -55,12 +56,16 @@ class Role(str, Enum):
 
 
 class SyncMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow, nullable=False, index=True
     )
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, index=True
+    )
 
     def soft_delete(self, now: datetime) -> None:
         self.is_deleted = True
@@ -85,9 +90,15 @@ class SyncReceipt(Base):
         UniqueConstraint("change_id", "user_id", "project_id", name="uq_sync_receipt"),
     )
 
-    change_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
-    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), index=True, nullable=False)
+    change_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), index=True, nullable=False
+    )
 
     entity: Mapped[str] = mapped_column(String(40), index=True, nullable=False)
     entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
@@ -96,20 +107,32 @@ class SyncReceipt(Base):
     status: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
     response: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
-    processed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
 
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
-    ts: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True, nullable=False)
+    ts: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, index=True, nullable=False
+    )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
-    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), index=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), index=True, nullable=False
+    )
 
-    change_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
+    change_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), index=True, nullable=False
+    )
     entity: Mapped[str] = mapped_column(String(40), index=True, nullable=False)
-    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), index=True, nullable=False
+    )
     op: Mapped[str] = mapped_column(String(20), nullable=False)
 
     before: Mapped[dict | None] = mapped_column(JSONB)
@@ -119,7 +142,9 @@ class AuditLog(Base):
 class User(Base):
     __tablename__ = "users"
 
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
+    email: Mapped[str] = mapped_column(
+        String(320), unique=True, index=True, nullable=False
+    )
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
@@ -129,22 +154,36 @@ class Project(Base):
 
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
 
 
 class ProjectMember(Base):
     __tablename__ = "project_members"
-    __table_args__ = (UniqueConstraint("project_id", "user_id", name="uq_project_user"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "user_id", name="uq_project_user"),
+    )
 
-    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
     role: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
 
 
 class ItemBaseMixin(SyncMixin):
-    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True
+    )
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     probability: Mapped[int] = mapped_column(Integer, default=1)
     impact: Mapped[int] = mapped_column(Integer, default=1)
@@ -159,14 +198,24 @@ class ItemBaseMixin(SyncMixin):
     triggers: Mapped[str | None] = mapped_column(Text)
     mitigation_plan: Mapped[str | None] = mapped_column(Text)
     document_url: Mapped[str | None] = mapped_column(Text)
-    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
-    status: Mapped[str] = mapped_column(String(30), default=RiskStatus.concept.value, nullable=False, index=True)
-    identified_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False, index=True)
-    status_changed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(30), default=RiskStatus.concept.value, nullable=False, index=True
+    )
+    identified_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False, index=True
+    )
+    status_changed_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
     response_at: Mapped[datetime | None] = mapped_column(DateTime)
     occurred_at: Mapped[datetime | None] = mapped_column(DateTime)
     score: Mapped[int] = mapped_column(Integer, default=1, index=True)
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
 
     def change_status(self, new_status: str, now: datetime) -> None:
         if self.status != new_status:
@@ -176,32 +225,33 @@ class ItemBaseMixin(SyncMixin):
                 self.occurred_at = now
 
 
-class Risk(Base, ItemBaseMixin):
-    __tablename__ = "risks"
-    __table_args__ = (UniqueConstraint("project_id", "code", name="uq_risks_project_code"),)
-
-
-class Opportunity(Base, ItemBaseMixin):
-    __tablename__ = "opportunities"
-    __table_args__ = (UniqueConstraint("project_id", "code", name="uq_opps_project_code"),)
+class Item(Base, ItemBaseMixin):
+    __tablename__ = "items"
+    __table_args__ = (
+        UniqueConstraint("project_id", "code", name="uq_items_project_code"),
+    )
+    type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
 
 
 class AssessmentMixin(SyncMixin):
-    assessor_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    assessor_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
     probability: Mapped[int] = mapped_column(Integer, nullable=False)
     impact: Mapped[int] = mapped_column(Integer, nullable=False)
     score: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
 
-class RiskAssessment(Base, AssessmentMixin):
-    __tablename__ = "risk_assessments"
-    __table_args__ = (UniqueConstraint("risk_id", "assessor_user_id", name="uq_risk_assessor"),)
-    risk_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("risks.id"), nullable=False, index=True)
 
-class OpportunityAssessment(Base, AssessmentMixin):
-    __tablename__ = "opportunity_assessments"
-    __table_args__ = (UniqueConstraint("opportunity_id", "assessor_user_id", name="uq_opp_assessor"),)
-    opportunity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("opportunities.id"), nullable=False, index=True)
+class Assessment(Base, AssessmentMixin):
+    __tablename__ = "assessments"
+    __table_args__ = (
+        UniqueConstraint("item_id", "assessor_user_id", name="uq_item_assessor"),
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("items.id"), nullable=False, index=True
+    )
+
 
 class ActionKind(str, Enum):
     mitigation = "mitigation"
@@ -217,42 +267,51 @@ class ActionStatus(str, Enum):
 
 class Action(Base, SyncMixin):
     __tablename__ = "actions"
-    __table_args__ = (
-        CheckConstraint(
-            "((risk_id IS NOT NULL)::int + (opportunity_id IS NOT NULL)::int) = 1",
-            name="ck_action_exactly_one_target",
-        ),
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True
     )
-
-    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
-
-    risk_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("risks.id"), index=True)
-    opportunity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("opportunities.id"), index=True)
-
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("items.id"), index=True, nullable=False
+    )
     kind: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
 
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default=ActionStatus.open.value, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ActionStatus.open.value, index=True
+    )
 
-    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), index=True
+    )
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
 
 
 class ScoreSnapshot(Base):
     __tablename__ = "score_snapshots"
 
-    batch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), index=True, nullable=False
+    )
     captured_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False)
 
-    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), index=True, nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), index=True, nullable=False
+    )
     kind: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
 
-    item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), index=True, nullable=False
+    )
     title: Mapped[str] = mapped_column(String(300), nullable=False)
 
     probability: Mapped[int] = mapped_column(Integer, nullable=False)
     impact: Mapped[int] = mapped_column(Integer, nullable=False)
     score: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
 
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False
+    )

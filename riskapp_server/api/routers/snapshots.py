@@ -5,21 +5,31 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, insert, select
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
 from ...auth import get_current_user
 from ...core.permissions import ensure_member, require_min_role
-from ...db import Opportunity, Risk, Role, ScoreSnapshot, User, get_db, utcnow
+from ...db import Item, Role, ScoreSnapshot, User, get_db, utcnow
 from ...schemas import SnapshotCreateOut, TopBatch, TopItem
 
 router = APIRouter(tags=["snapshots"])
 
 
 def _top_item(r: ScoreSnapshot) -> TopItem:
-    return TopItem(item_id=r.item_id, title=r.title, probability=r.probability, impact=r.impact, score=r.score)
+    return TopItem(
+        item_id=r.item_id,
+        title=r.title,
+        probability=r.probability,
+        impact=r.impact,
+        score=r.score,
+    )
 
 
-@router.post("/projects/{project_id}/snapshots", response_model=SnapshotCreateOut, status_code=201)
+@router.post(
+    "/projects/{project_id}/snapshots",
+    response_model=SnapshotCreateOut,
+    status_code=201,
+)
 def create_snapshot(
     project_id: uuid.UUID,
     db: Session = Depends(get_db),
@@ -32,10 +42,15 @@ def create_snapshot(
     data: list[dict] = []
     counts = {"risk": 0, "opportunity": 0}
 
-    for Model, kind in ((Risk, "risk"), (Opportunity, "opportunity")):
+    for kind in ("risk", "opportunity"):
         items = db.execute(
-            select(Model.id, Model.title, Model.probability, Model.impact, Model.score)
-            .where(Model.project_id == project_id, Model.is_deleted.is_(False))
+            select(
+                Item.id, Item.title, Item.probability, Item.impact, Item.score
+            ).where(
+                Item.project_id == project_id,
+                Item.is_deleted.is_(False),
+                Item.type == kind,
+            )
         ).all()
         counts[kind] = len(items)
         data.extend(
@@ -58,7 +73,12 @@ def create_snapshot(
     if data:
         db.execute(insert(ScoreSnapshot), data)
     db.commit()
-    return SnapshotCreateOut(batch_id=batch_id, captured_at=captured_at, risks=counts["risk"], opportunities=counts["opportunity"])
+    return SnapshotCreateOut(
+        batch_id=batch_id,
+        captured_at=captured_at,
+        risks=counts["risk"],
+        opportunities=counts["opportunity"],
+    )
 
 
 @router.get("/projects/{project_id}/snapshots/{batch_id}/top", response_model=TopBatch)
@@ -88,9 +108,15 @@ def top_items(
         .all()
     )
     if not rows:
-        raise HTTPException(status_code=404, detail="Snapshot batch not found (or empty)")
+        raise HTTPException(
+            status_code=404, detail="Snapshot batch not found (or empty)"
+        )
 
-    return TopBatch(batch_id=batch_id, captured_at=rows[0].captured_at, top=[_top_item(r) for r in rows])
+    return TopBatch(
+        batch_id=batch_id,
+        captured_at=rows[0].captured_at,
+        top=[_top_item(r) for r in rows],
+    )
 
 
 @router.get("/projects/{project_id}/top-history", response_model=list[TopBatch])
@@ -107,7 +133,13 @@ def top_history(
     limit = max(1, min(limit, 100))
 
     k = (kind or "").strip().lower()
-    snap_kind = "risk" if k in {"risks", "risk"} else "opportunity" if k in {"opportunities", "opportunity", "opps", "opp"} else None
+    snap_kind = (
+        "risk"
+        if k in {"risks", "risk"}
+        else "opportunity"
+        if k in {"opportunities", "opportunity", "opps", "opp"}
+        else None
+    )
     if not snap_kind:
         raise HTTPException(status_code=400, detail="kind must be risks|opportunities")
 
@@ -117,24 +149,23 @@ def top_history(
     if to_ts is not None:
         where.append(ScoreSnapshot.captured_at <= to_ts)
 
-    batches = (
-        db.execute(
-            select(ScoreSnapshot.batch_id, ScoreSnapshot.captured_at)
-            .where(*where)
-            .group_by(ScoreSnapshot.batch_id, ScoreSnapshot.captured_at)
-            .order_by(ScoreSnapshot.captured_at.asc())
-        )
-        .all()
-    )
+    batches = db.execute(
+        select(ScoreSnapshot.batch_id, ScoreSnapshot.captured_at)
+        .where(*where)
+        .group_by(ScoreSnapshot.batch_id, ScoreSnapshot.captured_at)
+        .order_by(ScoreSnapshot.captured_at.asc())
+    ).all()
     if not batches:
         return []
 
     batch_ids = [b[0] for b in batches]
     subq = (
         select(
-            ScoreSnapshot,
+            ScoreSnapshot.id,
             func.row_number()
-            .over(partition_by=ScoreSnapshot.batch_id, order_by=ScoreSnapshot.score.desc())
+            .over(
+                partition_by=ScoreSnapshot.batch_id, order_by=ScoreSnapshot.score.desc()
+            )
             .label("rn"),
         )
         .where(
@@ -144,15 +175,22 @@ def top_history(
         )
         .subquery()
     )
-    snap = aliased(ScoreSnapshot, subq)
     all_rows = (
-        db.execute(select(snap).where(subq.c.rn <= limit).order_by(subq.c.batch_id, subq.c.rn))
+        db.execute(
+            select(ScoreSnapshot)
+            .join(subq, ScoreSnapshot.id == subq.c.id)
+            .where(subq.c.rn <= limit)
+            .order_by(ScoreSnapshot.batch_id, subq.c.rn)
+        )
         .scalars()
         .all()
     )
-
     by_batch: dict[uuid.UUID, list[ScoreSnapshot]] = {}
     for r in all_rows:
         by_batch.setdefault(r.batch_id, []).append(r)
-
-    return [TopBatch(batch_id=b, captured_at=ts, top=[_top_item(r) for r in by_batch.get(b, [])]) for b, ts in batches]
+    return [
+        TopBatch(
+            batch_id=b, captured_at=ts, top=[_top_item(r) for r in by_batch.get(b, [])]
+        )
+        for b, ts in batches
+    ]

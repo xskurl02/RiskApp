@@ -1,7 +1,8 @@
 from __future__ import annotations
-from .crud_factory import create_crud_router
+
 from ...db import Risk, RiskAssessment
-from ...schemas import RiskCreate, RiskOut, RiskUpdate, RiskAssessmentOut
+from ...schemas import RiskAssessmentOut, RiskCreate, RiskOut, RiskUpdate
+from .crud_factory import create_crud_router
 
 router = create_crud_router(
     prefix="risks",
@@ -11,5 +12,5 @@ router = create_crud_router(
     UpdateSchema=RiskUpdate,
     OutSchema=RiskOut,
     AssessmentModel=RiskAssessment,
-    AssessmentOutSchema=RiskAssessmentOut
+    AssessmentOutSchema=RiskAssessmentOut,
 )

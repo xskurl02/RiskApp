@@ -5,14 +5,16 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from riskapp_client.adapters.local_storage.sync_outbox_queue import OutboxStore
 from riskapp_client.adapters.local_storage.sqlite_data_store import LocalStore, utc_iso
+from riskapp_client.adapters.local_storage.sync_outbox_queue import OutboxStore
 
 
 class SyncService:
     """Push outbox changes, then pull remote changes."""
 
-    def __init__(self, store: LocalStore, outbox: OutboxStore, remote: Any | None) -> None:
+    def __init__(
+        self, store: LocalStore, outbox: OutboxStore, remote: Any | None
+    ) -> None:
         self._store = store
         self._outbox = outbox
         self._remote = remote
@@ -32,19 +34,19 @@ class SyncService:
 
     def _extract_change_ids(self, items: object) -> list[str]:
         """Extract non-empty change_id values from a list of dict-ish objects."""
-        out: list[str] = []
-        for it in (items or []):
-            try:
-                cid = str(it.get("change_id") or "")  # type: ignore[union-attr]
-            except Exception:
-                cid = ""
-            if cid:
-                out.append(cid)
-        return out
+        return [
+            str(it.get("change_id"))
+            for it in (items or [])
+            if isinstance(it, dict) and it.get("change_id")
+        ]
 
-    def _push_once(self, project_id: str, changes: list[dict[str, Any]]) -> dict[str, Any]:
+    def _push_once(
+        self, project_id: str, changes: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         if not self._remote:
-            raise RuntimeError("No server configured (start the app online at least once).")
+            raise RuntimeError(
+                "No server configured (start the app online at least once)."
+            )
         return self._remote.sync_push(project_id, changes)
 
     def _process_push(
@@ -60,7 +62,9 @@ class SyncService:
             (pushed_count, conflicts_payloads, errors_payloads)
         """
         resp = self._push_once(project_id, changes)
-        sent_ids = [str(c.get("change_id") or "") for c in changes if c.get("change_id")]
+        sent_ids = [
+            str(c.get("change_id") or "") for c in changes if c.get("change_id")
+        ]
 
         conflicts = list(resp.get("conflicts") or [])
         errors = list(resp.get("errors") or [])
@@ -104,7 +108,9 @@ class SyncService:
 
     def sync_project(self, project_id: str) -> dict[str, Any]:
         if not self._remote:
-            raise RuntimeError("No server configured (start the app online at least once).")
+            raise RuntimeError(
+                "No server configured (start the app online at least once)."
+            )
 
         summary: dict[str, Any] = {
             "pushed": 0,
@@ -133,7 +139,9 @@ class SyncService:
                 # Retry only the freshly requeued changes once. If they still conflict, block them.
                 retry_changes = self._outbox.get_pending_changes(project_id, limit=100)
                 retry_set = set(requeued_new_ids)
-                retry_changes = [c for c in retry_changes if str(c.get("change_id")) in retry_set]
+                retry_changes = [
+                    c for c in retry_changes if str(c.get("change_id")) in retry_set
+                ]
 
                 if retry_changes:
                     pushed2, _conflicts2, _errors2 = self._process_push(

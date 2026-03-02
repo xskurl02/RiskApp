@@ -7,16 +7,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...auth import get_current_user
-from ...core.action_targets import combine_action_target_ids
 from ...core.items_crud import delete_item
 from ...core.permissions import ensure_member, require_min_role
-from ...db import Action, ActionStatus, Opportunity, Risk, Role, User, get_db, utcnow
+from ...db import Action, ActionStatus, Item, Role, User, get_db, utcnow
 from ...schemas import ActionCreate, ActionOut, ActionUpdate
 
 router = APIRouter(tags=["actions"])
 
 
-@router.post("/projects/{project_id}/actions", response_model=ActionOut, status_code=201)
+@router.post(
+    "/projects/{project_id}/actions", response_model=ActionOut, status_code=201
+)
 def create_action(
     project_id: uuid.UUID,
     payload: ActionCreate,
@@ -24,15 +25,12 @@ def create_action(
     user: User = Depends(get_current_user),
 ) -> Action:
     require_min_role(db, project_id, user.id, min_role=Role.member)
-
-    try:
-        t, target_id = combine_action_target_ids(risk_id=payload.risk_id, opportunity_id=payload.opportunity_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    TargetModel = Risk if t == "risk" else Opportunity
-    if not db.execute(select(TargetModel.id).where(TargetModel.project_id == project_id, TargetModel.id == target_id)).first():
-        raise HTTPException(status_code=400, detail="Target item not found in this project")
+    if not db.execute(
+        select(Item.id).where(Item.project_id == project_id, Item.id == payload.item_id)
+    ).first():
+        raise HTTPException(
+            status_code=400, detail="Target item not found in this project"
+        )
 
     now = utcnow()
     data = payload.model_dump()
@@ -84,7 +82,11 @@ def update_action(
     require_min_role(db, project_id, user.id, min_role=Role.member)
 
     action = (
-        db.execute(select(Action).where(Action.project_id == project_id, Action.id == action_id))
+        db.execute(
+            select(Action).where(
+                Action.project_id == project_id, Action.id == action_id
+            )
+        )
         .scalars()
         .first()
     )
