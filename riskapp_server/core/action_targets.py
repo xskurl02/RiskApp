@@ -24,16 +24,3 @@ def combine_action_target_ids(
     if risk_id is not None:
         return "risk", risk_id
     return "opportunity", opportunity_id  # type: ignore[return-value]
-
-
-def split_action_target_ids(
-    *,
-    target_type: ActionTargetType,
-    target_id: uuid.UUID,
-) -> tuple[uuid.UUID | None, uuid.UUID | None]:
-    """Convert (target_type, target_id) into (risk_id, opportunity_id)."""
-    if target_type == "risk":
-        return target_id, None
-    if target_type == "opportunity":
-        return None, target_id
-    raise ValueError(f"Unknown target_type: {target_type!r}")

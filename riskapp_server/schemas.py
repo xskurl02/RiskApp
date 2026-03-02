@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from db import ActionKind, ActionStatus, RiskStatus, Role
+from .db import ActionKind, ActionStatus, RiskStatus, Role
 
 
 class ORMModel(BaseModel):
@@ -44,95 +44,52 @@ class ProjectOut(ORMModel):
     created_by: uuid.UUID
 
 
-class ItemCreateBase(BaseModel):
+class ItemShared(BaseModel):
+    impact_cost: int | None = Field(default=None, ge=1, le=5)
+    impact_time: int | None = Field(default=None, ge=1, le=5)
+    impact_scope: int | None = Field(default=None, ge=1, le=5)
+    impact_quality: int | None = Field(default=None, ge=1, le=5)
+    code: str | None = None
+    description: str | None = None
+    category: str | None = None
+    threat: str | None = None
+    triggers: str | None = None
+    mitigation_plan: str | None = None
+    document_url: str | None = None
+    owner_user_id: uuid.UUID | None = None
+    status: RiskStatus | None = None
+    identified_at: datetime | None = None
+    response_at: datetime | None = None
+    occurred_at: datetime | None = None
+
+
+class ItemCreateBase(ItemShared):
     title: str
     probability: int = Field(ge=1, le=5)
     impact: int = Field(ge=1, le=5)
 
-    impact_cost: int | None = Field(default=None, ge=1, le=5)
-    impact_time: int | None = Field(default=None, ge=1, le=5)
-    impact_scope: int | None = Field(default=None, ge=1, le=5)
-    impact_quality: int | None = Field(default=None, ge=1, le=5)
 
-    code: str | None = None
-    description: str | None = None
-    category: str | None = None
-    threat: str | None = None
-    triggers: str | None = None
-    mitigation_plan: str | None = None
-    document_url: str | None = None
-
-    owner_user_id: uuid.UUID | None = None
-    status: RiskStatus | None = None
-
-    identified_at: datetime | None = None
-    response_at: datetime | None = None
-    occurred_at: datetime | None = None
-
-
-class ItemUpdateBase(BaseModel):
+class ItemUpdateBase(ItemShared):
     base_version: int | None = None
-
     title: str | None = None
     probability: int | None = Field(default=None, ge=1, le=5)
     impact: int | None = Field(default=None, ge=1, le=5)
 
-    impact_cost: int | None = Field(default=None, ge=1, le=5)
-    impact_time: int | None = Field(default=None, ge=1, le=5)
-    impact_scope: int | None = Field(default=None, ge=1, le=5)
-    impact_quality: int | None = Field(default=None, ge=1, le=5)
 
-    code: str | None = None
-    description: str | None = None
-    category: str | None = None
-    threat: str | None = None
-    triggers: str | None = None
-    mitigation_plan: str | None = None
-    document_url: str | None = None
-
-    owner_user_id: uuid.UUID | None = None
-    status: RiskStatus | None = None
-
-    identified_at: datetime | None = None
-    response_at: datetime | None = None
-    occurred_at: datetime | None = None
-
-
-class ItemOutBase(ORMModel):
+class ItemOutBase(ItemShared, ORMModel):
     id: uuid.UUID
     project_id: uuid.UUID
-
     title: str
     probability: int
     impact: int
     score: int
-
-    impact_cost: int | None = None
-    impact_time: int | None = None
-    impact_scope: int | None = None
-    impact_quality: int | None = None
-
-    code: str | None = None
-    description: str | None = None
-    category: str | None = None
-    threat: str | None = None
-    triggers: str | None = None
-
-    mitigation_plan: str | None = None
-    document_url: str | None = None
-
-    owner_user_id: uuid.UUID | None = None
-    status: RiskStatus | None = None
-    identified_at: datetime | None = None
     status_changed_at: datetime | None = None
-    response_at: datetime | None = None
-    occurred_at: datetime | None = None
-
     created_at: datetime
     created_by: uuid.UUID
     updated_at: datetime
     version: int
     is_deleted: bool
+
 
 RiskCreate = ItemCreateBase
 RiskUpdate = ItemUpdateBase
@@ -141,30 +98,28 @@ OpportunityCreate = ItemCreateBase
 OpportunityUpdate = ItemUpdateBase
 OpportunityOut = ItemOutBase
 
+
 class ScoreReportOut(BaseModel):
     total: int
     project_total: int | None = None
-
     min_score: int | None = None
     max_score: int | None = None
     avg_score: float | None = None
-
     status_counts: dict[str, int] = Field(default_factory=dict)
     category_counts: dict[str, int] = Field(default_factory=dict)
     owner_counts: dict[str, int] = Field(default_factory=dict)
-
     score_buckets: dict[str, int] = Field(default_factory=dict)
 
 
-class RiskAssessmentIn(BaseModel):
+class AssessmentIn(BaseModel):
+    base_version: int | None = None
     probability: int = Field(ge=1, le=5)
     impact: int = Field(ge=1, le=5)
     notes: str | None = None
 
 
-class RiskAssessmentOut(ORMModel):
+class AssessmentOutBase(ORMModel):
     id: uuid.UUID
-    risk_id: uuid.UUID
     assessor_user_id: uuid.UUID
     probability: int
     impact: int
@@ -175,12 +130,16 @@ class RiskAssessmentOut(ORMModel):
     version: int
     is_deleted: bool
 
+class RiskAssessmentOut(AssessmentOutBase):
+    risk_id: uuid.UUID
+
+class OpportunityAssessmentOut(AssessmentOutBase):
+    opportunity_id: uuid.UUID
 
 class MatrixResponse(BaseModel):
     kind: str
     probability_axis: list[int]
     impact_axis: list[int]
-
     risks: list[list[int]] | None = None
     opportunities: list[list[int]] | None = None
 
@@ -188,7 +147,6 @@ class MatrixResponse(BaseModel):
 class ActionCreate(BaseModel):
     risk_id: uuid.UUID | None = None
     opportunity_id: uuid.UUID | None = None
-
     kind: ActionKind
     title: str
     description: str | None = None
@@ -208,16 +166,13 @@ class ActionOut(ORMModel):
     project_id: uuid.UUID
     risk_id: uuid.UUID | None
     opportunity_id: uuid.UUID | None
-
     kind: ActionKind
     title: str
     description: str | None
     status: ActionStatus
-
     owner_user_id: uuid.UUID | None
     created_by: uuid.UUID
     created_at: datetime
-
     updated_at: datetime
     version: int
     is_deleted: bool
@@ -254,8 +209,8 @@ class SyncPullResponse(BaseModel):
     risks: list[RiskOut]
     opportunities: list[OpportunityOut]
     actions: list[ActionOut]
-    assessments: list[RiskAssessmentOut]
-
+    risk_assessments: list[RiskAssessmentOut]
+    opportunity_assessments: list[OpportunityAssessmentOut]
 
 class SyncChange(BaseModel):
     change_id: uuid.UUID
@@ -279,30 +234,33 @@ class SyncPushResponse(BaseModel):
     server_time: datetime
 
 
-# --- Sync specifické validační modely ---
+# Sync payload validators (internal)
 
-class SyncItemRecord(ItemUpdateBase):
-    id: uuid.UUID | None = None
-    created_at: datetime | None = None
-    created_by: uuid.UUID | None = None
-    is_deleted: bool | None = None
-    status_changed_at: datetime | None = None
-
-class SyncActionRecord(ActionUpdate):
-    id: uuid.UUID | None = None
-    risk_id: uuid.UUID | None = None
-    opportunity_id: uuid.UUID | None = None
-    created_at: datetime | None = None
-    created_by: uuid.UUID | None = None
-    is_deleted: bool | None = None
-
-class SyncAssessmentRecord(BaseModel):
-    id: uuid.UUID | None = None
-    risk_id: uuid.UUID | None = None
-    assessor_user_id: uuid.UUID | None = None
+class SyncItemRecord(ItemShared):
+    id: uuid.UUID
+    title: str | None = None
     probability: int | None = Field(default=None, ge=1, le=5)
     impact: int | None = Field(default=None, ge=1, le=5)
-    score: int | None = None
+    is_deleted: bool | None = None
+
+
+class SyncActionRecord(BaseModel):
+    id: uuid.UUID
+    risk_id: uuid.UUID | None = None
+    opportunity_id: uuid.UUID | None = None
+    kind: ActionKind | None = None
+    title: str | None = None
+    description: str | None = None
+    status: ActionStatus | None = None
+    owner_user_id: uuid.UUID | None = None
+    is_deleted: bool | None = None
+
+
+class SyncAssessmentRecord(BaseModel):
+    id: uuid.UUID
+    risk_id: uuid.UUID | None = None
+    opportunity_id: uuid.UUID | None = None
+    probability: int | None = Field(default=None, ge=1, le=5)
+    impact: int | None = Field(default=None, ge=1, le=5)
     notes: str | None = None
-    created_at: datetime | None = None
     is_deleted: bool | None = None

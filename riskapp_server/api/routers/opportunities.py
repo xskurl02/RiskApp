@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from api.routers.crud_factory import create_crud_router
-from db import Opportunity
-from schemas import OpportunityCreate, OpportunityOut, OpportunityUpdate
+from .crud_factory import create_crud_router
+from ...db import Opportunity, OpportunityAssessment
+from ...schemas import OpportunityCreate, OpportunityOut, OpportunityUpdate, OpportunityAssessmentOut
 
 router = create_crud_router(
     prefix="opportunities",
@@ -11,4 +11,6 @@ router = create_crud_router(
     CreateSchema=OpportunityCreate,
     UpdateSchema=OpportunityUpdate,
     OutSchema=OpportunityOut,
+    AssessmentModel=OpportunityAssessment,
+    AssessmentOutSchema=OpportunityAssessmentOut
 )

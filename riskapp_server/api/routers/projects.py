@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from auth import get_current_user
-from core.permissions import ensure_member, require_min_role
-from db import Project, ProjectMember, User, Role, get_db
-from schemas import AddMemberIn, MemberOut, ProjectCreate, ProjectOut
+from ...auth import get_current_user
+from ...core.permissions import ensure_member, require_min_role
+from ...db import Project, ProjectMember, Role, User, get_db, utcnow
+from ...schemas import AddMemberIn, MemberOut, ProjectCreate, ProjectOut
 
 router = APIRouter(tags=["projects"])
+
+
+def _ensure_not_last_admin(db: Session, project_id: uuid.UUID) -> None:
+    n = db.execute(
+        select(func.count())
+        .where(ProjectMember.project_id == project_id, ProjectMember.role == Role.admin.value)
+    ).scalar()
+    if (n or 0) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot downgrade or remove the last admin of the project")
 
 
 @router.post("/projects", response_model=ProjectOut, status_code=201)
@@ -22,27 +30,16 @@ def create_project(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Project:
-    now = datetime.utcnow()
-    project = Project(
-        name=payload.name,
-        description=payload.description,
-        created_at=now,
-        created_by=user.id,
-    )
+    now = utcnow()
+    project = Project(id=uuid.uuid4(), created_at=now, created_by=user.id, **payload.model_dump(exclude_unset=True))
     db.add(project)
-    db.commit()
-    db.refresh(project)
-
     db.add(ProjectMember(project_id=project.id, user_id=user.id, role=Role.admin.value, created_at=now))
     db.commit()
     return project
 
 
 @router.get("/projects", response_model=list[ProjectOut])
-def list_projects(
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> list[Project]:
+def list_projects(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Project]:
     return (
         db.execute(
             select(Project)
@@ -77,9 +74,8 @@ def add_member(
 ) -> dict[str, Any]:
     require_min_role(db, project_id, user.id, min_role=Role.admin)
 
-    target = (
-        db.execute(select(User).where(User.email == str(payload.user_email))).scalars().first()
-    )
+    target_email = str(payload.user_email).lower()
+    target = db.execute(select(User).where(User.email == target_email)).scalars().first()
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -95,18 +91,13 @@ def add_member(
     )
 
     if existing:
+        if existing.role == Role.admin.value and payload.role.value != Role.admin.value:
+            _ensure_not_last_admin(db, project_id)
         existing.role = payload.role.value
         db.commit()
         return {"ok": True, "updated": True}
 
-    db.add(
-        ProjectMember(
-            project_id=project_id,
-            user_id=target.id,
-            role=payload.role.value,
-            created_at=datetime.utcnow(),
-        )
-    )
+    db.add(ProjectMember(project_id=project_id, user_id=target.id, role=payload.role.value, created_at=utcnow()))
     db.commit()
     return {"ok": True, "updated": False}
 
@@ -127,15 +118,7 @@ def list_members(
         )
         .all()
     )
-    return [
-        MemberOut(
-            user_id=u.id,
-            email=u.email,
-            role=pm.role,  # type: ignore[arg-type]
-            created_at=getattr(pm, "created_at", None),
-        )
-        for pm, u in rows
-    ]
+    return [MemberOut(user_id=u.id, email=u.email, role=pm.role, created_at=getattr(pm, "created_at", None)) for pm, u in rows]
 
 
 @router.delete("/projects/{project_id}/members/{member_user_id}", status_code=204)
@@ -147,17 +130,15 @@ def remove_member(
 ) -> None:
     require_min_role(db, project_id, user.id, min_role=Role.admin)
     m = (
-        db.execute(
-            select(ProjectMember).where(
-                ProjectMember.project_id == project_id,
-                ProjectMember.user_id == member_user_id,
-            )
-        )
+        db.execute(select(ProjectMember).where(ProjectMember.project_id == project_id, ProjectMember.user_id == member_user_id))
         .scalars()
         .first()
     )
     if not m:
         raise HTTPException(status_code=404, detail="Member not found")
+
+    if m.role == Role.admin.value:
+        _ensure_not_last_admin(db, project_id)
+
     db.delete(m)
     db.commit()
-    return None

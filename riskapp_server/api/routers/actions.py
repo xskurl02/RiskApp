@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from auth import get_current_user
-from core.permissions import ensure_member, require_min_role
-from core.items_crud import delete_item
-from db import Action, Opportunity, Risk, User, Role, get_db
-from schemas import ActionCreate, ActionOut, ActionUpdate
+from ...auth import get_current_user
+from ...core.action_targets import combine_action_target_ids
+from ...core.items_crud import delete_item
+from ...core.permissions import ensure_member, require_min_role
+from ...db import Action, ActionStatus, Opportunity, Risk, Role, User, get_db, utcnow
+from ...schemas import ActionCreate, ActionOut, ActionUpdate
 
 router = APIRouter(tags=["actions"])
 
@@ -25,39 +25,30 @@ def create_action(
 ) -> Action:
     require_min_role(db, project_id, user.id, min_role=Role.member)
 
-    if (payload.risk_id is None) == (payload.opportunity_id is None):
-        raise HTTPException(
-            status_code=400,
-            detail="Provide exactly one of risk_id/opportunity_id",
-        )
+    try:
+        t, target_id = combine_action_target_ids(risk_id=payload.risk_id, opportunity_id=payload.opportunity_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    # DRY: Determine Target Model dynamically and verify existence in one step
-    TargetModel = Risk if payload.risk_id else Opportunity
-    target_id = payload.risk_id or payload.opportunity_id
-    
-    exists = db.execute(
-        select(TargetModel.id).where(TargetModel.project_id == project_id, TargetModel.id == target_id)
-    ).first()
-    if not exists:
+    TargetModel = Risk if t == "risk" else Opportunity
+    if not db.execute(select(TargetModel.id).where(TargetModel.project_id == project_id, TargetModel.id == target_id)).first():
         raise HTTPException(status_code=400, detail="Target item not found in this project")
 
-    now = datetime.utcnow()
-    action = Action(
-        id=uuid.uuid4(),
-        project_id=project_id,
-        risk_id=payload.risk_id,
-        opportunity_id=payload.opportunity_id,
-        kind=payload.kind.value,
-        title=payload.title,
-        description=payload.description,
-        status="open",
-        owner_user_id=payload.owner_user_id,
-        created_by=user.id,
-        created_at=now,
-        updated_at=now,
-        version=1,
-        is_deleted=False,
+    now = utcnow()
+    data = payload.model_dump()
+    data.update(
+        {
+            "id": uuid.uuid4(),
+            "project_id": project_id,
+            "status": ActionStatus.open.value,
+            "created_by": user.id,
+            "created_at": now,
+            "updated_at": now,
+            "version": 1,
+            "is_deleted": False,
+        }
     )
+    action = Action(**data)
     db.add(action)
     db.commit()
     db.refresh(action)
@@ -81,6 +72,7 @@ def list_actions(
         .all()
     )
 
+
 @router.patch("/projects/{project_id}/actions/{action_id}", response_model=ActionOut)
 def update_action(
     project_id: uuid.UUID,
@@ -99,18 +91,10 @@ def update_action(
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
 
-    if payload.kind is not None:
-        action.kind = payload.kind.value
-    if payload.title is not None:
-        action.title = payload.title
-    if payload.description is not None:
-        action.description = payload.description
-    if payload.status is not None:
-        action.status = payload.status.value
-    if payload.owner_user_id is not None:
-        action.owner_user_id = payload.owner_user_id
+    for field, val in payload.model_dump(exclude_unset=True).items():
+        setattr(action, field, getattr(val, "value", val))
 
-    action.updated_at = datetime.utcnow()
+    action.updated_at = utcnow()
     action.version = int(action.version) + 1
     db.commit()
     db.refresh(action)

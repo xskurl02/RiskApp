@@ -1,125 +1,94 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import case, cast, func, select, String
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.filters import apply_item_filters
-from core.scoring import compute_overall_impact, compute_score
-from schemas import ScoreReportOut
+from .filters import apply_item_filters
+from .scoring import recalculate_item_scores
+from ..db import utcnow
+from ..schemas import ScoreReportOut
+
 
 def create_item(db: Session, user_id: uuid.UUID, project_id: uuid.UUID, payload, Model):
-    now = datetime.utcnow()
+    now = utcnow()
     prefix = "R" if Model.__name__ == "Risk" else "O"
-    code = (payload.code or f"{prefix}-{uuid.uuid4().hex[:8].upper()}").strip() or None
-    
-    overall_impact = compute_overall_impact(
-        payload.impact,
-        impact_cost=payload.impact_cost,
-        impact_time=payload.impact_time,
-        impact_scope=payload.impact_scope,
-        impact_quality=payload.impact_quality,
+    code = str(payload.code or f"{prefix}-{uuid.uuid4().hex[:8].upper()}").strip()
+
+    data = payload.model_dump(exclude_unset=True)
+    data.update(
+        {
+            "id": uuid.uuid4(),
+            "project_id": project_id,
+            "code": code,
+            "score": 0,
+            "status": getattr(payload.status, "value", payload.status) or "concept",
+            "identified_at": payload.identified_at or now,
+            "status_changed_at": now,
+            "created_at": now,
+            "created_by": user_id,
+            "updated_at": now,
+            "version": 1,
+            "is_deleted": False,
+        }
     )
 
-    item = Model(
-        id=uuid.uuid4(),
-        project_id=project_id,
-        title=payload.title,
-        probability=payload.probability,
-        impact=overall_impact,
-        impact_cost=payload.impact_cost,
-        impact_time=payload.impact_time,
-        impact_scope=payload.impact_scope,
-        impact_quality=payload.impact_quality,
-        score=compute_score(payload.probability, overall_impact),
-        code=code,
-        description=payload.description,
-        category=payload.category,
-        threat=payload.threat,
-        triggers=payload.triggers,
-        mitigation_plan=payload.mitigation_plan,
-        document_url=payload.document_url,
-        owner_user_id=payload.owner_user_id,
-        status=(payload.status.value if payload.status else "concept"),
-        identified_at=(payload.identified_at or now),
-        status_changed_at=now,
-        response_at=payload.response_at,
-        occurred_at=payload.occurred_at,
-        created_at=now,
-        created_by=user_id,
-        updated_at=now,
-        version=1,
-        is_deleted=False,
-    )
-
+    item = Model(**data)
+    recalculate_item_scores(item)
     db.add(item)
     try:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(
-            status_code=409, detail=f"{Model.__name__} code already exists in this project"
-        ) from exc
+        raise HTTPException(status_code=409, detail=f"{Model.__name__} code already exists in this project") from exc
     db.refresh(item)
     return item
 
 
 def update_item(db: Session, project_id: uuid.UUID, item_id: uuid.UUID, payload, Model):
-    now = datetime.utcnow()
-    item = db.execute(select(Model).where(Model.project_id == project_id, Model.id == item_id)).scalars().first()
-    
+    now = utcnow()
+    item = (
+        db.execute(select(Model).where(Model.project_id == project_id, Model.id == item_id))
+        .scalars()
+        .first()
+    )
     if not item:
         raise HTTPException(status_code=404, detail=f"{Model.__name__} not found")
 
     if payload.base_version is not None and item.version != payload.base_version:
-        raise HTTPException(
-            status_code=409, detail={"reason": "version_mismatch", "server_version": item.version}
-        )
+        raise HTTPException(status_code=409, detail={"reason": "version_mismatch", "server_version": item.version})
 
-    # DRY: Use Pydantic's exclude_unset to strictly update only provided fields
-    update_data = payload.model_dump(exclude_unset=True)
+    update_data = payload.model_dump(exclude_unset=True, exclude={"base_version"})
+    if update_data.get("code"):
+        update_data["code"] = str(update_data["code"]).strip()
+
     for field, val in update_data.items():
-        if field not in ("base_version", "code", "status"):
-            setattr(item, field, val)
+        v = getattr(val, "value", val)
+        if field == "status":
+            item.change_status(v, now)
+        else:
+            setattr(item, field, v)
 
-    if payload.code is not None:
-        item.code = payload.code.strip() or None
-
-    if payload.status is not None:
-        new_status = payload.status.value
-        if new_status != item.status:
-            item.status = new_status
-            item.status_changed_at = now
-
-    overall_impact = compute_overall_impact(
-        int(item.impact),
-        impact_cost=getattr(item, "impact_cost", None),
-        impact_time=getattr(item, "impact_time", None),
-        impact_scope=getattr(item, "impact_scope", None),
-        impact_quality=getattr(item, "impact_quality", None),
-    )
-    item.impact = overall_impact
-    item.score = compute_score(item.probability, overall_impact)
+    recalculate_item_scores(item)
     item.updated_at = now
     item.version = int(item.version) + 1
 
     try:
         db.commit()
+        db.refresh(item)
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=f"{Model.__name__} code already exists") from exc
-    db.refresh(item)
+
     return item
 
 
 def list_items(db: Session, project_id: uuid.UUID, Model, filters: dict):
-    stmt = select(Model).where(Model.project_id == project_id)
     stmt = apply_item_filters(
-        stmt,
+        select(Model).where(Model.project_id == project_id),
         Model,
         search=filters.get("search"),
         min_score=filters.get("min_score"),
@@ -129,32 +98,26 @@ def list_items(db: Session, project_id: uuid.UUID, Model, filters: dict):
         owner_user_id=filters.get("owner_user_id"),
         from_date=filters.get("from_date"),
         to_date=filters.get("to_date"),
-    )
-    stmt = stmt.order_by(Model.score.desc(), Model.title.asc())
+    ).order_by(Model.score.desc(), Model.title.asc())
     return db.execute(stmt).scalars().all()
 
 
 def delete_item(db: Session, project_id: uuid.UUID, item_id: uuid.UUID, Model):
-    item = db.execute(select(Model).where(Model.project_id == project_id, Model.id == item_id)).scalars().first()
+    item = (
+        db.execute(select(Model).where(Model.project_id == project_id, Model.id == item_id))
+        .scalars()
+        .first()
+    )
     if not item:
         raise HTTPException(status_code=404, detail=f"{Model.__name__} not found")
-
-    item.is_deleted = True
-    if hasattr(item, "status") and Model.__name__ != "Action":
-        item.status = "deleted"
-    if hasattr(item, "status_changed_at"):
-        item.status_changed_at = datetime.utcnow()
-    item.updated_at = datetime.utcnow()
-    item.version = int(item.version) + 1
+    item.soft_delete(utcnow())
     db.commit()
     return None
 
 
 def generate_report(db: Session, project_id: uuid.UUID, Model, filters: dict) -> ScoreReportOut:
-    """Generates a comprehensive analytical report for Risks or Opportunities."""
-    base_stmt = select(Model).where(Model.project_id == project_id)
     stmt = apply_item_filters(
-        base_stmt,
+        select(Model).where(Model.project_id == project_id),
         Model,
         search=filters.get("search"),
         min_score=filters.get("min_score"),
@@ -166,46 +129,62 @@ def generate_report(db: Session, project_id: uuid.UUID, Model, filters: dict) ->
         to_date=filters.get("to_date"),
     )
 
-    # Total in project with the same deleted semantics (but no other filters)
-    total_stmt = apply_item_filters(
-        select(func.count(Model.id)).where(Model.project_id == project_id),
-        Model,
-        search=None, min_score=None, max_score=None,
-        status=filters.get("status"), category=None,
-        owner_user_id=None, from_date=None, to_date=None,
+    project_total = int(
+        db.execute(
+            apply_item_filters(
+                select(func.count(Model.id)).where(Model.project_id == project_id),
+                Model,
+                search=None,
+                min_score=None,
+                max_score=None,
+                status=filters.get("status"),
+                category=None,
+                owner_user_id=None,
+                from_date=None,
+                to_date=None,
+            )
+        ).scalar_one()
+        or 0
     )
-    project_total = int(db.execute(total_stmt).scalar_one() or 0)
 
-    subq = stmt.subquery()
-    r = subq.c
+    rows = db.execute(stmt).scalars().all()
+    total = len(rows)
+    scores = [r.score for r in rows]
+    mn = min(scores) if scores else None
+    mx = max(scores) if scores else None
+    avg = (sum(scores) / total) if total else None
 
-    total, mn, mx, avg = db.execute(
-        select(func.count(r.id), func.min(r.score), func.max(r.score), func.avg(r.score))
-    ).one()
+    status_counts: dict[str, int] = {}
+    category_counts: dict[str, int] = {}
+    owner_counts: dict[str, int] = {}
+    buckets = {"0-4": 0, "5-9": 0, "10-14": 0, "15-19": 0, "20-25": 0}
 
-    status_counts = {str(k or "concept"): int(v) for k, v in db.execute(select(r.status, func.count(r.id)).group_by(r.status)).all()}
-    category_counts = {str(k): int(v) for k, v in db.execute(select(func.coalesce(r.category, "(none)"), func.count(r.id)).group_by(func.coalesce(r.category, "(none)"))).all()}
-    owner_counts = {str(k): int(v) for k, v in db.execute(select(func.coalesce(cast(r.owner_user_id, String), "(none)"), func.count(r.id)).group_by(func.coalesce(cast(r.owner_user_id, String), "(none)"))).all()}
-
-    bucket = case(
-        (r.score <= 4, "0-4"),
-        (r.score <= 9, "5-9"),
-        (r.score <= 14, "10-14"),
-        (r.score <= 19, "15-19"),
-        else_="20-25",
-    )
-    score_buckets = {"0-4": 0, "5-9": 0, "10-14": 0, "15-19": 0, "20-25": 0}
-    for b, n in db.execute(select(bucket, func.count(r.id)).group_by(bucket)).all():
-        score_buckets[str(b)] = int(n or 0)
+    for r in rows:
+        status_counts[r.status or "concept"] = status_counts.get(r.status or "concept", 0) + 1
+        category_counts[r.category or "(none)"] = category_counts.get(r.category or "(none)", 0) + 1
+        owner = str(r.owner_user_id) if r.owner_user_id else "(none)"
+        owner_counts[owner] = owner_counts.get(owner, 0) + 1
+        b = (
+            "0-4"
+            if r.score <= 4
+            else "5-9"
+            if r.score <= 9
+            else "10-14"
+            if r.score <= 14
+            else "15-19"
+            if r.score <= 19
+            else "20-25"
+        )
+        buckets[b] += 1
 
     return ScoreReportOut(
-        total=int(total or 0),
+        total=total,
         project_total=project_total,
-        min_score=int(mn) if mn is not None else None,
-        max_score=int(mx) if mx is not None else None,
-        avg_score=float(avg) if avg is not None else None,
+        min_score=mn,
+        max_score=mx,
+        avg_score=avg,
         status_counts=status_counts,
         category_counts=category_counts,
         owner_counts=owner_counts,
-        score_buckets=score_buckets,
+        score_buckets=buckets,
     )
