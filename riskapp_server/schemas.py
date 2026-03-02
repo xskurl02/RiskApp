@@ -71,11 +71,27 @@ class ItemCreate(ItemShared):
     impact: int = Field(ge=1, le=5)
 
 
+class RiskCreate(ItemCreate):
+    type: Literal["risk"] = "risk"
+
+
+class OpportunityCreate(ItemCreate):
+    type: Literal["opportunity"] = "opportunity"
+
+
 class ItemUpdate(ItemShared):
     base_version: int | None = None
     title: str | None = None
     probability: int | None = Field(default=None, ge=1, le=5)
     impact: int | None = Field(default=None, ge=1, le=5)
+
+
+class RiskUpdate(ItemUpdate):
+    pass
+
+
+class OpportunityUpdate(ItemUpdate):
+    pass
 
 
 class ItemOut(ItemShared, ORMModel):
@@ -92,6 +108,14 @@ class ItemOut(ItemShared, ORMModel):
     updated_at: datetime
     version: int
     is_deleted: bool
+
+
+class RiskOut(ItemOut):
+    type: Literal["risk"]
+
+
+class OpportunityOut(ItemOut):
+    type: Literal["opportunity"]
 
 
 class ScoreReportOut(BaseModel):
@@ -127,6 +151,20 @@ class AssessmentOut(ORMModel):
     is_deleted: bool
 
 
+class RiskAssessmentOut(ORMModel):
+    id: uuid.UUID
+    risk_id: uuid.UUID
+    assessor_user_id: uuid.UUID
+    probability: int
+    impact: int
+    score: int
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+    version: int
+    is_deleted: bool
+
+
 class MatrixResponse(BaseModel):
     kind: str
     probability_axis: list[int]
@@ -136,14 +174,18 @@ class MatrixResponse(BaseModel):
 
 
 class ActionCreate(BaseModel):
-    item_id: uuid.UUID
+    risk_id: uuid.UUID | None = None
+    opportunity_id: uuid.UUID | None = None
     kind: ActionKind
     title: str
     description: str | None = None
+    status: ActionStatus | None = None
     owner_user_id: uuid.UUID | None = None
 
 
 class ActionUpdate(BaseModel):
+    risk_id: uuid.UUID | None = None
+    opportunity_id: uuid.UUID | None = None
     kind: ActionKind | None = None
     title: str | None = None
     description: str | None = None
@@ -154,14 +196,13 @@ class ActionUpdate(BaseModel):
 class ActionOut(ORMModel):
     id: uuid.UUID
     project_id: uuid.UUID
-    item_id: uuid.UUID
+    risk_id: uuid.UUID | None = None
+    opportunity_id: uuid.UUID | None = None
     kind: ActionKind
     title: str
     description: str | None
     status: ActionStatus
     owner_user_id: uuid.UUID | None
-    created_by: uuid.UUID
-    created_at: datetime
     updated_at: datetime
     version: int
     is_deleted: bool
@@ -172,6 +213,13 @@ class SnapshotCreateOut(BaseModel):
     captured_at: datetime
     risks: int = 0
     opportunities: int = 0
+
+
+class SnapshotLatestOut(BaseModel):
+    batch_id: uuid.UUID
+    captured_at: datetime
+    kind: str
+    count: int
 
 
 class TopItem(BaseModel):
@@ -191,13 +239,20 @@ class TopBatch(BaseModel):
 class SyncPullRequest(BaseModel):
     project_id: uuid.UUID
     since: datetime
+    # Optional pagination support (per entity). If omitted, server uses legacy
+    # behavior but applies a safety cap (MAX_SYNC_PULL_PER_ENTITY).
+    limit_per_entity: int | None = Field(default=None, ge=1, le=50000)
+    cursors: dict[str, str] | None = None
 
 
 class SyncPullResponse(BaseModel):
     server_time: datetime
-    items: list[ItemOut]
+    risks: list[RiskOut]
+    opportunities: list[OpportunityOut]
     actions: list[ActionOut]
-    assessments: list[AssessmentOut]
+    assessments: list[RiskAssessmentOut]
+    has_more: dict[str, bool] | None = None
+    cursors: dict[str, str] | None = None
 
 
 class SyncChange(BaseModel):
@@ -236,6 +291,8 @@ class SyncItemRecord(ItemShared):
 class SyncActionRecord(BaseModel):
     id: uuid.UUID
     item_id: uuid.UUID | None = None
+    risk_id: uuid.UUID | None = None
+    opportunity_id: uuid.UUID | None = None
     kind: ActionKind | None = None
     title: str | None = None
     description: str | None = None
@@ -247,6 +304,7 @@ class SyncActionRecord(BaseModel):
 class SyncAssessmentRecord(BaseModel):
     id: uuid.UUID
     item_id: uuid.UUID | None = None
+    risk_id: uuid.UUID | None = None
     probability: int | None = Field(default=None, ge=1, le=5)
     impact: int | None = Field(default=None, ge=1, le=5)
     notes: str | None = None

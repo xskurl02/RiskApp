@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from riskapp_client.adapters.local_storage.sync_outbox_queue import OutboxStore
 from riskapp_client.adapters.local_storage.sqlite_data_store import LocalStore
+from riskapp_client.adapters.local_storage.sync_outbox_queue import OutboxStore
 from riskapp_client.domain.domain_models import (
     Action,
     Assessment,
@@ -27,7 +27,10 @@ from riskapp_client.domain.domain_models import (
 from riskapp_client.services.action_management_service import ActionService
 from riskapp_client.services.assessment_management_service import AssessmentService
 from riskapp_client.services.member_management_service import MembersService
-from riskapp_client.services.scored_entity_management_service import ScoredEntityService, ScoredEntityWiring
+from riskapp_client.services.scored_entity_management_service import (
+    ScoredEntityService,
+    ScoredEntityWiring,
+)
 from riskapp_client.services.synchronization_service import SyncService
 
 
@@ -96,7 +99,9 @@ class OfflineFirstBackend(Backend):
     def list_risks(self, project_id: str) -> list[Risk]:
         return self._risks.list(project_id)
 
-    def create_risk(self, project_id: str, *, title: str, probability: int, impact: int, **meta) -> Risk:
+    def create_risk(
+        self, project_id: str, *, title: str, probability: int, impact: int, **meta
+    ) -> Risk:
         return self._risks.create(
             project_id,
             title=title,
@@ -105,7 +110,17 @@ class OfflineFirstBackend(Backend):
             meta=meta,
         )
 
-    def update_risk(self, risk_id: str, *, title: str, probability: int, impact: int, **meta) -> Risk:
+    def update_risk(
+        self,
+        project_id: str,
+        risk_id: str,
+        *,
+        title: str,
+        probability: int,
+        impact: int,
+        base_version: int | None = None,
+        **meta,
+    ) -> Risk:
         return self._risks.update(
             risk_id,
             title=title,
@@ -131,7 +146,15 @@ class OfflineFirstBackend(Backend):
         )
 
     def update_opportunity(
-        self, opportunity_id: str, *, title: str, probability: int, impact: int, **meta
+        self,
+        project_id: str,
+        opportunity_id: str,
+        *,
+        title: str,
+        probability: int,
+        impact: int,
+        base_version: int | None = None,
+        **meta,
     ) -> Opportunity:
         return self._opps.update(
             opportunity_id,
@@ -149,7 +172,7 @@ class OfflineFirstBackend(Backend):
     def create_action(self, project_id: str, **kwargs: Any) -> Action:
         return self._actions.create(project_id, **kwargs)
 
-    def update_action(self, action_id: str, **kwargs: Any) -> Action:
+    def update_action(self, project_id: str, action_id: str, **kwargs: Any) -> Action:
         return self._actions.update(action_id, **kwargs)
 
     # ---- Assessments ----
@@ -203,7 +226,9 @@ class OfflineFirstBackend(Backend):
     ):
         if not self.remote:
             return []
-        return self.remote.top_history(project_id, kind=kind, limit=limit, from_ts=from_ts, to_ts=to_ts)
+        return self.remote.top_history(
+            project_id, kind=kind, limit=limit, from_ts=from_ts, to_ts=to_ts
+        )
 
     # ---- Sync ----
 

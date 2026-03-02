@@ -3,7 +3,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol
-from riskapp_client.domain.scored_entity_fields import DEFAULT_STATUS, ACTION_DEFAULT_STATUS
+
+from riskapp_client.domain.scored_entity_fields import (
+    ACTION_DEFAULT_STATUS,
+    DEFAULT_STATUS,
+)
+
 
 @dataclass
 class Member:
@@ -12,11 +17,13 @@ class Member:
     role: str
     created_at: str | None = None
 
+
 @dataclass
 class Project:
     id: str
     name: str
     description: str = ""
+
 
 @dataclass
 class Action:
@@ -25,7 +32,7 @@ class Action:
     risk_id: str | None
     opportunity_id: str | None
 
-    kind: str          # mitigation|contingency|exploit
+    kind: str  # mitigation|contingency|exploit
     title: str
     description: str = ""
     status: str = ACTION_DEFAULT_STATUS
@@ -35,6 +42,7 @@ class Action:
     version: int = 0
     is_deleted: bool = False
     updated_at: str = ""
+
 
 @dataclass
 class ScoredEntity:
@@ -73,20 +81,26 @@ class ScoredEntity:
     score: int = field(init=False)
 
     def __post_init__(self) -> None:
-        dims = [self.impact_cost, self.impact_time, self.impact_scope, self.impact_quality]
+        dims = [
+            self.impact_cost,
+            self.impact_time,
+            self.impact_scope,
+            self.impact_quality,
+        ]
         dims = [int(x) for x in dims if x is not None]
         if dims:
             self.impact = max(dims)
         self.score = int(self.probability) * int(self.impact)
 
+
 @dataclass
 class Risk(ScoredEntity):
     pass
 
+
 @dataclass
 class Opportunity(ScoredEntity):
     pass
-
 
 
 @dataclass
@@ -112,7 +126,7 @@ class Assessment:
 
 class Backend(Protocol):
     def list_projects(self) -> List[Project]: ...
-    
+
     # --- Risks ---
     def list_risks(self, project_id: str) -> List[Risk]: ...
     def create_risk(
@@ -143,6 +157,7 @@ class Backend(Protocol):
 
     def update_risk(
         self,
+        project_id: str,
         risk_id: str,
         *,
         title: str,
@@ -165,6 +180,7 @@ class Backend(Protocol):
         status_changed_at: str | None = None,
         response_at: str | None = None,
         occurred_at: str | None = None,
+        base_version: int | None = None,
     ) -> Risk: ...
 
     # --- Opportunities ---
@@ -197,6 +213,7 @@ class Backend(Protocol):
 
     def update_opportunity(
         self,
+        project_id: str,
         opportunity_id: str,
         *,
         title: str,
@@ -219,6 +236,7 @@ class Backend(Protocol):
         status_changed_at: str | None = None,
         response_at: str | None = None,
         occurred_at: str | None = None,
+        base_version: int | None = None,
     ) -> Opportunity: ...
 
     # --- Members / roles ---
@@ -232,17 +250,18 @@ class Backend(Protocol):
         self,
         project_id: str,
         *,
-        target_type: str,      # "risk" | "opportunity"
+        target_type: str,  # "risk" | "opportunity"
         target_id: str,
-        kind: str,             # mitigation|contingency|exploit
+        kind: str,  # mitigation|contingency|exploit
         title: str,
         description: str,
-        status: str,           # open|doing|done
+        status: str,  # open|doing|done
         owner_user_id: str | None,
     ) -> Action: ...
 
     def update_action(
         self,
+        project_id: str,
         action_id: str,
         *,
         target_type: str,
@@ -252,6 +271,7 @@ class Backend(Protocol):
         description: str,
         status: str,
         owner_user_id: str | None,
+        base_version: int | None = None,
     ) -> Action: ...
 
     # --- Assessments ---

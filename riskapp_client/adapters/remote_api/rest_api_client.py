@@ -272,12 +272,6 @@ class ApiBackend:
         self.auto_create_project = auto_create_project
         self.user_id: Optional[str] = None
         self.token: Optional[str] = None
-        self._opp_to_project: Dict[str, str] = {}
-        self._opp_version: Dict[str, int] = {}
-        self._risk_to_project: Dict[str, str] = {}
-        self._risk_version: Dict[str, int] = {}
-        self._action_to_project: Dict[str, str] = {}
-        self._action_version: Dict[str, int] = {}
         self._login(password)
 
     def _req(
@@ -375,42 +369,13 @@ class ApiBackend:
         )
 
     def _to_risk(self, j) -> Risk:
-        rid = str(j["id"])
-        pid = str(j["project_id"])
-        self._risk_to_project[rid] = pid
-
-        if "version" in j:
-            try:
-                self._risk_version[rid] = int(j["version"])
-            except Exception:
-                pass
-
         return scored_entity_from_mapping(j, model_cls=Risk)
 
     def _to_opportunity(self, j) -> Opportunity:
-        oid = str(j["id"])
-        pid = str(j["project_id"])
-        self._opp_to_project[oid] = pid
-
-        if "version" in j:
-            try:
-                self._opp_version[oid] = int(j["version"])
-            except Exception:
-                pass
-
         return scored_entity_from_mapping(j, model_cls=Opportunity)
 
     def _to_action(self, j) -> Action:
-        action = action_from_mapping(j)
-        aid = str(action.id)
-        pid = str(action.project_id)
-        self._action_to_project[aid] = pid
-
-        try:
-            self._action_version[aid] = int(getattr(action, "version", 0) or 0)
-        except Exception:
-            pass
-        return action
+        return action_from_mapping(j)
 
     def _build_scored_payload(
         self, title: str, probability: int, impact: int, meta: dict
@@ -486,20 +451,25 @@ class ApiBackend:
         return self._to_opportunity(j)
 
     def update_opportunity(
-        self, opportunity_id: str, *, title: str, probability: int, impact: int, **meta
+        self,
+        project_id: str,
+        opportunity_id: str,
+        *,
+        title: str,
+        probability: int,
+        impact: int,
+        base_version: Optional[int] = None,
+        **meta,
     ) -> Opportunity:
-        pid = self._opp_to_project.get(opportunity_id)
-        if not pid:
-            raise KeyError(
-                "Unknown opportunity_id (select the project and refresh first)"
-            )
         body = self._build_scored_payload(title, probability, impact, meta)
 
-        if opportunity_id in self._opp_version:
-            body["base_version"] = int(self._opp_version[opportunity_id])
+        if base_version is not None:
+            body["base_version"] = int(base_version)
 
         j = self._req(
-            "PATCH", f"/projects/{pid}/opportunities/{opportunity_id}", json_body=body
+            "PATCH",
+            f"/projects/{project_id}/opportunities/{opportunity_id}",
+            json_body=body,
         )
         return self._to_opportunity(j)
 
@@ -566,16 +536,23 @@ class ApiBackend:
         return self._to_risk(j)
 
     def update_risk(
-        self, risk_id: str, *, title: str, probability: int, impact: int, **meta
+        self,
+        project_id: str,
+        risk_id: str,
+        *,
+        title: str,
+        probability: int,
+        impact: int,
+        base_version: Optional[int] = None,
+        **meta,
     ) -> Risk:
-        pid = self._risk_to_project.get(risk_id)
-        if not pid:
-            raise KeyError("Unknown risk_id (select the project and refresh first)")
         body = self._build_scored_payload(title, probability, impact, meta)
-        if risk_id in self._risk_version:
-            body["base_version"] = int(self._risk_version[risk_id])
+        if base_version is not None:
+            body["base_version"] = int(base_version)
 
-        j = self._req("PATCH", f"/projects/{pid}/risks/{risk_id}", json_body=body)
+        j = self._req(
+            "PATCH", f"/projects/{project_id}/risks/{risk_id}", json_body=body
+        )
         return self._to_risk(j)
 
     def sync_pull(self, project_id: str, since_iso: str):
@@ -622,6 +599,8 @@ class ApiBackend:
             "description": description or None,
             "owner_user_id": owner_user_id,
         }
+        if status:
+            body["status"] = status
         if target_type == "risk":
             body["risk_id"] = target_id
         else:
@@ -632,6 +611,7 @@ class ApiBackend:
 
     def update_action(
         self,
+        project_id: str,
         action_id: str,
         *,
         target_type: str,
@@ -642,10 +622,6 @@ class ApiBackend:
         status: str,
         owner_user_id: str | None,
     ) -> Action:
-        pid = self._action_to_project.get(action_id)
-        if not pid:
-            raise KeyError("Unknown action_id (select project and refresh first)")
-
         body = {
             "kind": kind,
             "title": title,
@@ -661,7 +637,9 @@ class ApiBackend:
             body["risk_id"] = None
             body["opportunity_id"] = target_id
 
-        j = self._req("PATCH", f"/projects/{pid}/actions/{action_id}", json_body=body)
+        j = self._req(
+            "PATCH", f"/projects/{project_id}/actions/{action_id}", json_body=body
+        )
         return self._to_action(j)
 
     def top_history(

@@ -49,12 +49,13 @@ class OutboxStore:
     def pending_count(self, project_id: Optional[str] = None) -> int:
         if project_id:
             row = self.conn.execute(
-                f"SELECT COUNT(*) AS c FROM outbox WHERE project_id=? AND status='{STATUS_PENDING}';",
-                (project_id,),
+                "SELECT COUNT(*) AS c FROM outbox WHERE project_id=? AND status=?;",
+                (project_id, STATUS_PENDING),
             ).fetchone()
         else:
             row = self.conn.execute(
-                f"SELECT COUNT(*) AS c FROM outbox WHERE status='{STATUS_PENDING}';"
+                "SELECT COUNT(*) AS c FROM outbox WHERE status=?;",
+                (STATUS_PENDING,),
             ).fetchone()
         return int(row["c"]) if row else 0
 
@@ -73,18 +74,19 @@ class OutboxStore:
         cur.execute(
             "DELETE FROM outbox "
             "WHERE project_id=? AND entity=? AND entity_id=? "
-            f"AND status IN ('{STATUS_PENDING}','{STATUS_BLOCKED}');",
-            (project_id, entity, entity_id),
+            "AND status IN (?, ?);",
+            (project_id, entity, entity_id, STATUS_PENDING, STATUS_BLOCKED),
         )
 
         change_id = str(uuid.uuid4())
+        # NOTE: use SQL parameters for status values; do not embed placeholders.
         cur.execute(
             """
             INSERT INTO outbox (
                 change_id, project_id, entity, op, entity_id,
                 base_version, record_json, status, last_error, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, '{STATUS_PENDING}', '', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?)
             """,
             (
                 change_id,
@@ -94,6 +96,7 @@ class OutboxStore:
                 entity_id,
                 base_version,
                 json.dumps(record),
+                STATUS_PENDING,
                 utc_iso(),
             ),
         )
@@ -203,11 +206,11 @@ class OutboxStore:
             """
             SELECT change_id, entity, op, base_version, record_json
             FROM outbox
-            WHERE project_id=? AND status='{STATUS_PENDING}'
+            WHERE project_id=? AND status=?
             ORDER BY created_at ASC
             LIMIT ?
             """,
-            (project_id, int(limit)),
+            (project_id, STATUS_PENDING, int(limit)),
         ).fetchall()
 
         out: list[dict[str, Any]] = []
@@ -232,8 +235,8 @@ class OutboxStore:
 
     def block_outbox_id(self, change_id: str, err: str) -> None:
         self.conn.execute(
-            f"UPDATE outbox SET status='{STATUS_BLOCKED}', last_error=? WHERE change_id=?;",
-            (err[:500], change_id),
+            "UPDATE outbox SET status=?, last_error=? WHERE change_id=?;",
+            (STATUS_BLOCKED, err[:500], change_id),
         )
         self.conn.commit()
 

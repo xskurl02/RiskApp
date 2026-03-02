@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import secrets
 import uuid
 from datetime import timedelta
@@ -28,10 +29,18 @@ from .core.config import (
 )
 from .db import User, get_db, utcnow
 
-if SECRET_KEY == "change-me" and not ALLOW_INSECURE_DEFAULT_SECRET:
-    raise RuntimeError(
-        "SECURITY: Set SECRET_KEY env var "
-        "(or set ALLOW_INSECURE_DEFAULT_SECRET=1 for local dev)."
+logger = logging.getLogger("riskapp_server.auth")
+
+if SECRET_KEY == "change-me":
+    if not ALLOW_INSECURE_DEFAULT_SECRET:
+        raise RuntimeError(
+            "SECURITY: Set SECRET_KEY env var "
+            "(or set ALLOW_INSECURE_DEFAULT_SECRET=1 for local dev)."
+        )
+    # Keep the service runnable out-of-the-box, but make the risk explicit.
+    logger.warning(
+        "SECURITY WARNING: Using the default SECRET_KEY. Set SECRET_KEY for any "
+        "non-trivial deployment."
     )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")

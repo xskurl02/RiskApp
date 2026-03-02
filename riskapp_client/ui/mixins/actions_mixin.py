@@ -9,43 +9,55 @@ from PySide6.QtCore import Qt  # pylint: disable=no-name-in-module
 from PySide6.QtWidgets import QMessageBox  # pylint: disable=no-name-in-module
 from riskapp_client.domain.scored_entity_fields import ACTION_DEFAULT_STATUS
 
+
 class ActionsMixin:
     """MainWindow mixin: ActionsMixin"""
 
-    def _toggle_action_target_inputs(self) -> None:       
+    def _toggle_action_target_inputs(self) -> None:
         tab = self.actions_tab
-        is_risk = (tab.action_target_type.currentText() == "risk")
+        is_risk = tab.action_target_type.currentText() == "risk"
         tab.action_risk_combo.setEnabled(is_risk)
         tab.action_opp_combo.setEnabled(not is_risk)
 
     def _refresh_target_combo(self, combo, fetch_method, cache_attr: str) -> None:
         combo.setCurrentIndex(-1)
         pid = self.current_project_id
-        if not pid: return
+        if not pid:
+            return
         items = self._call_backend("Backend error", fetch_method, pid)
-        if items is None: return
+        if items is None:
+            return
         setattr(self, cache_attr, {item.id: item.title for item in items})
         combo.blockSignals(True)
         combo.clear()
-        for item in items: combo.addItem(item.title, item.id)
+        for item in items:
+            combo.addItem(item.title, item.id)
         combo.blockSignals(False)
 
     def _refresh_action_risk_combo(self) -> None:
-        self._refresh_target_combo(self.actions_tab.action_risk_combo, self.backend.list_risks, "_risk_title_by_id")
+        self._refresh_target_combo(
+            self.actions_tab.action_risk_combo,
+            self.backend.list_risks,
+            "_risk_title_by_id",
+        )
 
     def _refresh_action_opp_combo(self) -> None:
-        self._refresh_target_combo(self.actions_tab.action_opp_combo, self.backend.list_opportunities, "_opp_title_by_id")
+        self._refresh_target_combo(
+            self.actions_tab.action_opp_combo,
+            self.backend.list_opportunities,
+            "_opp_title_by_id",
+        )
 
     def _refresh_actions(self, select_action_id: str | None = None) -> None:
         tab = self.actions_tab
         pid = self.current_project_id
         if not pid:
             return
-        
+
         actions = self._call_backend("Backend error", self.backend.list_actions, pid)
         if actions is None:
             return
-        
+
         self._action_by_id = {a.id: a for a in actions}  # cache for row clicks
         tab.actions_table.setRowCount(0)
         for a in actions:
@@ -141,14 +153,27 @@ class ActionsMixin:
             QMessageBox.warning(self, "Validation", "Title is required.")
             return
         kwargs = {
-            "target_type": target_type, "target_id": target_id, "kind": kind,
-            "title": title, "description": desc, "status": status, "owner_user_id": owner
-        }        
+            "target_type": target_type,
+            "target_id": target_id,
+            "kind": kind,
+            "title": title,
+            "description": desc,
+            "status": status,
+            "owner_user_id": owner,
+        }
 
         if self.current_action_id:
-            a = self._call_backend("Backend error", self.backend.update_action, self.current_action_id, **kwargs)
+            a = self._call_backend(
+                "Backend error",
+                self.backend.update_action,
+                pid,
+                self.current_action_id,
+                **kwargs,
+            )
         else:
-            a = self._call_backend("Backend error", self.backend.create_action, pid, **kwargs)
+            a = self._call_backend(
+                "Backend error", self.backend.create_action, pid, **kwargs
+            )
 
         if a is None:
             return

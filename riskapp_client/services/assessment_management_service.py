@@ -46,14 +46,16 @@ class AssessmentService:
             updated_at=updated_at,
             dirty=1,
         )
+        # IMPORTANT: queue_assessment_upsert accepts keyword arguments only.
+        # Also note that the server derives assessor_user_id from the JWT user,
+        # so we do not send it as part of the sync record.
         self._outbox.queue_assessment_upsert(
             assessment_id,
             project_id,
-            risk_id,
-            assessor_user_id,
-            int(probability),
-            int(impact),
-            notes,
+            risk_id=risk_id,
+            probability=int(probability),
+            impact=int(impact),
+            notes=(notes or ""),
         )
 
         return Assessment(

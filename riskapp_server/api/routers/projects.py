@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from ...auth import get_current_user
+from ...core.config import RETENTION_DAYS
 from ...core.permissions import ensure_member, require_min_role
-from ...db import Project, ProjectMember, Role, User, get_db, utcnow
+from ...db import (
+    AuditLog,
+    Project,
+    ProjectMember,
+    Role,
+    SyncReceipt,
+    User,
+    get_db,
+    utcnow,
+)
 from ...schemas import AddMemberIn, MemberOut, ProjectCreate, ProjectOut
 
 router = APIRouter(tags=["projects"])
@@ -154,13 +165,17 @@ def list_members(
     ]
 
 
-@router.delete("/projects/{project_id}/members/{member_user_id}", status_code=204)
+@router.delete(
+    "/projects/{project_id}/members/{member_user_id}",
+    status_code=204,
+    response_class=Response,
+)
 def remove_member(
     project_id: uuid.UUID,
     member_user_id: uuid.UUID,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> None:
+) -> Response:
     require_min_role(db, project_id, user.id, min_role=Role.admin)
     m = (
         db.execute(
@@ -180,3 +195,37 @@ def remove_member(
 
     db.delete(m)
     db.commit()
+    return Response(status_code=204)
+
+
+@router.post("/projects/{project_id}/maintenance/prune")
+def prune_project_logs(
+    project_id: uuid.UUID,
+    days: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Delete old audit/sync receipt rows for a project.
+
+    This keeps long-running projects from accumulating unbounded log tables.
+    """
+    require_min_role(db, project_id, user.id, min_role=Role.admin)
+    d = int(days or RETENTION_DAYS)
+    d = max(1, min(d, 3650))
+    cutoff = utcnow() - timedelta(days=d)
+
+    r1 = db.execute(
+        delete(AuditLog).where(AuditLog.project_id == project_id, AuditLog.ts < cutoff)
+    )
+    r2 = db.execute(
+        delete(SyncReceipt).where(
+            SyncReceipt.project_id == project_id, SyncReceipt.processed_at < cutoff
+        )
+    )
+    db.commit()
+    return {
+        "ok": True,
+        "cutoff": cutoff.isoformat(),
+        "audit_deleted": int(getattr(r1, "rowcount", 0) or 0),
+        "sync_receipts_deleted": int(getattr(r2, "rowcount", 0) or 0),
+    }

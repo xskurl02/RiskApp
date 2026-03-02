@@ -1,13 +1,14 @@
-from __future__ import annotations
-
+import csv
+import io
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...auth import get_current_user
-from ...core.filters import ItemFilterParams
+from ...core.filters import ItemFilterParams, apply_item_filters
 from ...core.items_crud import (
     create_item,
     delete_item,
@@ -29,6 +30,7 @@ def create_crud_router(
     CreateSchema,
     UpdateSchema,
     OutSchema,
+    fixed_type: str | None = None,
     AssessmentModel=None,
     AssessmentOutSchema=None,
 ) -> APIRouter:
@@ -54,7 +56,83 @@ def create_crud_router(
         user: User = Depends(get_current_user),
     ):
         ensure_member(db, project_id, user.id)
-        return list_items(db, project_id, Model, vars(filters))
+        f = vars(filters)
+        if fixed_type:
+            f["item_type"] = fixed_type
+        return list_items(db, project_id, Model, f)
+
+    @r.get(f"/projects/{{project_id}}/{prefix}/export.csv")
+    def export_csv(
+        project_id: uuid.UUID,
+        filters: ItemFilterParams = Depends(),
+        db: Session = Depends(get_db),
+        user: User = Depends(get_current_user),
+    ):
+        """Export current filtered page as CSV.
+
+        Keep it intentionally simple: same filters + limit/offset as the list endpoint.
+        For a full export, page through with limit/offset on the client.
+        """
+        ensure_member(db, project_id, user.id)
+        f = vars(filters)
+        if fixed_type:
+            f["item_type"] = fixed_type
+
+        stmt = apply_item_filters(
+            select(Model).where(Model.project_id == project_id),
+            Model,
+            search=f.get("search"),
+            item_type=f.get("item_type"),
+            min_score=f.get("min_score"),
+            max_score=f.get("max_score"),
+            status=f.get("status"),
+            category=f.get("category"),
+            owner_user_id=f.get("owner_user_id"),
+            from_date=f.get("from_date"),
+            to_date=f.get("to_date"),
+        ).order_by(Model.score.desc(), Model.title.asc())
+
+        limit = int(f.get("limit", 100))
+        offset = int(f.get("offset", 0))
+        if limit:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(offset)
+
+        cols = [
+            "id",
+            "type" if hasattr(Model, "type") else None,
+            "code",
+            "title",
+            "category",
+            "status",
+            "probability",
+            "impact",
+            "score",
+            "owner_user_id",
+            "identified_at",
+            "updated_at",
+            "version",
+            "is_deleted",
+        ]
+        cols = [c for c in cols if c]
+
+        def rows():
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(cols)
+            yield buf.getvalue().encode()
+            buf.seek(0)
+            buf.truncate(0)
+
+            for obj in db.execute(stmt).scalars():
+                w.writerow([getattr(obj, c, "") for c in cols])
+                yield buf.getvalue().encode()
+                buf.seek(0)
+                buf.truncate(0)
+
+        headers = {"Content-Disposition": f"attachment; filename={prefix}_export.csv"}
+        return StreamingResponse(rows(), media_type="text/csv", headers=headers)
 
     @r.patch(f"/projects/{{project_id}}/{prefix}/{{item_id}}", response_model=OutSchema)
     def update_obj(
@@ -65,17 +143,24 @@ def create_crud_router(
         user: User = Depends(get_current_user),
     ):
         require_min_role(db, project_id, user.id, min_role="member")
-        return update_item(db, project_id, item_id, payload, Model)
+        return update_item(
+            db, project_id, item_id, payload, Model, item_type=fixed_type
+        )
 
-    @r.delete(f"/projects/{{project_id}}/{prefix}/{{item_id}}", status_code=204)
+    @r.delete(
+        f"/projects/{{project_id}}/{prefix}/{{item_id}}",
+        status_code=204,
+        response_class=Response,
+    )
     def delete_obj(
         project_id: uuid.UUID,
         item_id: uuid.UUID,
         db: Session = Depends(get_db),
         user: User = Depends(get_current_user),
-    ) -> None:
+    ) -> Response:
         require_min_role(db, project_id, user.id, min_role="manager")
-        return delete_item(db, project_id, item_id, Model)
+        delete_item(db, project_id, item_id, Model, item_type=fixed_type)
+        return Response(status_code=204)
 
     @r.get(f"/projects/{{project_id}}/{prefix}/report", response_model=ScoreReportOut)
     def obj_report(
@@ -85,7 +170,10 @@ def create_crud_router(
         user: User = Depends(get_current_user),
     ):
         ensure_member(db, project_id, user.id)
-        return generate_report(db, project_id, Model, vars(filters))
+        f = vars(filters)
+        if fixed_type:
+            f["item_type"] = fixed_type
+        return generate_report(db, project_id, Model, f)
 
     if AssessmentModel and AssessmentOutSchema:
         parent_id_field = f"{Model.__name__.lower()}_id"
@@ -103,7 +191,14 @@ def create_crud_router(
             ensure_member(db, project_id, user.id)
             if not db.execute(
                 select(Model.id).where(
-                    Model.project_id == project_id, Model.id == item_id
+                    Model.project_id == project_id,
+                    Model.id == item_id,
+                    Model.is_deleted.is_(False),
+                    *(
+                        [Model.type == fixed_type]
+                        if fixed_type and hasattr(Model, "type")
+                        else []
+                    ),
                 )
             ).first():
                 raise HTTPException(status_code=404, detail="Item not found")
@@ -137,6 +232,11 @@ def create_crud_router(
                     Model.id == item_id,
                     Model.project_id == project_id,
                     Model.is_deleted.is_(False),
+                    *(
+                        [Model.type == fixed_type]
+                        if fixed_type and hasattr(Model, "type")
+                        else []
+                    ),
                 )
             ).first():
                 raise HTTPException(status_code=404, detail="Item not found")
@@ -154,16 +254,15 @@ def create_crud_router(
 
             now = utcnow()
             if not assessment:
-                kwargs = {
-                    "id": uuid.uuid4(),
-                    parent_id_field: item_id,
-                    "assessor_user_id": user.id,
-                    "created_at": now,
-                    "updated_at": now,
-                    "version": 0,
-                    "is_deleted": False,
-                }
-                assessment = AssessmentModel(**kwargs)
+                assessment = AssessmentModel(
+                    id=uuid.uuid4(),
+                    **{parent_id_field: item_id},
+                    assessor_user_id=user.id,
+                    created_at=now,
+                    updated_at=now,
+                    version=0,
+                    is_deleted=False,
+                )
                 db.add(assessment)
             elif (
                 payload.base_version is not None

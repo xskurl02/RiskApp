@@ -1,0 +1,11 @@
+fastapi>=0.110,<1
+uvicorn[standard]>=0.23
+
+SQLAlchemy>=2.0
+python-jose[cryptography]>=3.3
+
+# FastAPI form parsing for OAuth2PasswordRequestForm (/login)
+python-multipart>=0.0.9
+
+# EmailStr support
+email-validator>=2.1

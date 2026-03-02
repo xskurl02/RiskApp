@@ -8,9 +8,10 @@ from sqlalchemy import func, insert, select
 from sqlalchemy.orm import Session
 
 from ...auth import get_current_user
+from ...core.config import SNAPSHOT_INSERT_CHUNK
 from ...core.permissions import ensure_member, require_min_role
 from ...db import Item, Role, ScoreSnapshot, User, get_db, utcnow
-from ...schemas import SnapshotCreateOut, TopBatch, TopItem
+from ...schemas import SnapshotCreateOut, SnapshotLatestOut, TopBatch, TopItem
 
 router = APIRouter(tags=["snapshots"])
 
@@ -39,11 +40,19 @@ def create_snapshot(
 
     batch_id = uuid.uuid4()
     captured_at = utcnow()
-    data: list[dict] = []
     counts = {"risk": 0, "opportunity": 0}
 
+    chunk: list[dict] = []
+    chunk_size = max(100, int(SNAPSHOT_INSERT_CHUNK or 1000))
+
+    def flush_chunk() -> None:
+        nonlocal chunk
+        if chunk:
+            db.execute(insert(ScoreSnapshot), chunk)
+            chunk = []
+
     for kind in ("risk", "opportunity"):
-        items = db.execute(
+        rows = db.execute(
             select(
                 Item.id, Item.title, Item.probability, Item.impact, Item.score
             ).where(
@@ -51,33 +60,77 @@ def create_snapshot(
                 Item.is_deleted.is_(False),
                 Item.type == kind,
             )
-        ).all()
-        counts[kind] = len(items)
-        data.extend(
-            {
-                "id": uuid.uuid4(),
-                "batch_id": batch_id,
-                "captured_at": captured_at,
-                "project_id": project_id,
-                "kind": kind,
-                "item_id": i.id,
-                "title": i.title,
-                "probability": i.probability,
-                "impact": i.impact,
-                "score": i.score,
-                "created_by": user.id,
-            }
-            for i in items
         )
-
-    if data:
-        db.execute(insert(ScoreSnapshot), data)
+        for i in rows:
+            counts[kind] += 1
+            chunk.append(
+                {
+                    "id": uuid.uuid4(),
+                    "batch_id": batch_id,
+                    "captured_at": captured_at,
+                    "project_id": project_id,
+                    "kind": kind,
+                    "item_id": i.id,
+                    "title": i.title,
+                    "probability": i.probability,
+                    "impact": i.impact,
+                    "score": i.score,
+                    "created_by": user.id,
+                }
+            )
+            if len(chunk) >= chunk_size:
+                flush_chunk()
+    flush_chunk()
     db.commit()
     return SnapshotCreateOut(
         batch_id=batch_id,
         captured_at=captured_at,
         risks=counts["risk"],
         opportunities=counts["opportunity"],
+    )
+
+
+@router.get("/projects/{project_id}/snapshots/latest", response_model=SnapshotLatestOut)
+def latest_snapshot(
+    project_id: uuid.UUID,
+    kind: str = "risks",  # risks|opportunities
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SnapshotLatestOut:
+    ensure_member(db, project_id, user.id)
+    k = (kind or "").strip().lower()
+    snap_kind = (
+        "risk"
+        if k in {"risks", "risk"}
+        else "opportunity"
+        if k in {"opportunities", "opportunity"}
+        else None
+    )
+    if not snap_kind:
+        raise HTTPException(status_code=400, detail="kind must be risks|opportunities")
+
+    row = db.execute(
+        select(ScoreSnapshot.batch_id, ScoreSnapshot.captured_at)
+        .where(ScoreSnapshot.project_id == project_id, ScoreSnapshot.kind == snap_kind)
+        .order_by(ScoreSnapshot.captured_at.desc())
+        .limit(1)
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="No snapshots")
+
+    batch_id, captured_at = row
+    count = int(
+        db.execute(
+            select(func.count(ScoreSnapshot.id)).where(
+                ScoreSnapshot.project_id == project_id,
+                ScoreSnapshot.batch_id == batch_id,
+                ScoreSnapshot.kind == snap_kind,
+            )
+        ).scalar_one()
+        or 0
+    )
+    return SnapshotLatestOut(
+        batch_id=batch_id, captured_at=captured_at, kind=snap_kind, count=count
     )
 
 

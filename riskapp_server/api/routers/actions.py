@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,50 @@ from ...schemas import ActionCreate, ActionOut, ActionUpdate
 router = APIRouter(tags=["actions"])
 
 
+def _resolve_target(
+    db: Session,
+    project_id: uuid.UUID,
+    *,
+    risk_id: uuid.UUID | None,
+    opportunity_id: uuid.UUID | None,
+) -> tuple[uuid.UUID, str]:
+    if bool(risk_id) == bool(opportunity_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide exactly one of risk_id or opportunity_id",
+        )
+    item_id = risk_id or opportunity_id
+    expected_type = "risk" if risk_id else "opportunity"
+
+    item_type = db.execute(
+        select(Item.type).where(
+            Item.project_id == project_id,
+            Item.id == item_id,
+            Item.is_deleted.is_(False),
+        )
+    ).scalar()
+    if item_type != expected_type:
+        raise HTTPException(status_code=400, detail="Target not found in this project")
+    return item_id, expected_type
+
+
+def _action_out(action: Action, *, target_type: str) -> dict:
+    return ActionOut(
+        id=action.id,
+        project_id=action.project_id,
+        risk_id=action.item_id if target_type == "risk" else None,
+        opportunity_id=action.item_id if target_type == "opportunity" else None,
+        kind=action.kind,
+        title=action.title,
+        description=action.description,
+        status=action.status,
+        owner_user_id=action.owner_user_id,
+        updated_at=action.updated_at,
+        version=action.version,
+        is_deleted=action.is_deleted,
+    ).model_dump()
+
+
 @router.post(
     "/projects/{project_id}/actions", response_model=ActionOut, status_code=201
 )
@@ -23,34 +67,42 @@ def create_action(
     payload: ActionCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> Action:
+) -> dict:
     require_min_role(db, project_id, user.id, min_role=Role.member)
-    if not db.execute(
-        select(Item.id).where(Item.project_id == project_id, Item.id == payload.item_id)
-    ).first():
-        raise HTTPException(
-            status_code=400, detail="Target item not found in this project"
-        )
+
+    item_id, target_type = _resolve_target(
+        db,
+        project_id,
+        risk_id=payload.risk_id,
+        opportunity_id=payload.opportunity_id,
+    )
 
     now = utcnow()
-    data = payload.model_dump()
-    data.update(
-        {
-            "id": uuid.uuid4(),
-            "project_id": project_id,
-            "status": ActionStatus.open.value,
-            "created_by": user.id,
-            "created_at": now,
-            "updated_at": now,
-            "version": 1,
-            "is_deleted": False,
-        }
+    action = Action(
+        id=uuid.uuid4(),
+        project_id=project_id,
+        item_id=item_id,
+        kind=payload.kind.value
+        if hasattr(payload.kind, "value")
+        else str(payload.kind),
+        title=payload.title,
+        description=payload.description,
+        status=(
+            payload.status.value
+            if getattr(payload, "status", None) is not None
+            else ActionStatus.open.value
+        ),
+        owner_user_id=payload.owner_user_id,
+        created_by=user.id,
+        created_at=now,
+        updated_at=now,
+        version=1,
+        is_deleted=False,
     )
-    action = Action(**data)
     db.add(action)
     db.commit()
     db.refresh(action)
-    return action
+    return _action_out(action, target_type=target_type)
 
 
 @router.get("/projects/{project_id}/actions", response_model=list[ActionOut])
@@ -58,17 +110,15 @@ def list_actions(
     project_id: uuid.UUID,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[Action]:
+) -> list[dict]:
     ensure_member(db, project_id, user.id)
-    return (
-        db.execute(
-            select(Action)
-            .where(Action.project_id == project_id, Action.is_deleted.is_(False))
-            .order_by(Action.updated_at.desc())
-        )
-        .scalars()
-        .all()
-    )
+    rows = db.execute(
+        select(Action, Item.type)
+        .join(Item, Item.id == Action.item_id)
+        .where(Action.project_id == project_id, Action.is_deleted.is_(False))
+        .order_by(Action.updated_at.desc())
+    ).all()
+    return [_action_out(a, target_type=t) for a, t in rows]
 
 
 @router.patch("/projects/{project_id}/actions/{action_id}", response_model=ActionOut)
@@ -78,13 +128,15 @@ def update_action(
     payload: ActionUpdate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> Action:
+) -> dict:
     require_min_role(db, project_id, user.id, min_role=Role.member)
 
     action = (
         db.execute(
             select(Action).where(
-                Action.project_id == project_id, Action.id == action_id
+                Action.project_id == project_id,
+                Action.id == action_id,
+                Action.is_deleted.is_(False),
             )
         )
         .scalars()
@@ -93,22 +145,45 @@ def update_action(
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
 
-    for field, val in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+
+    # allow retargeting; explicit nulls are treated as provided
+    if "risk_id" in data or "opportunity_id" in data:
+        item_id, _t = _resolve_target(
+            db,
+            project_id,
+            risk_id=data.get("risk_id"),
+            opportunity_id=data.get("opportunity_id"),
+        )
+        action.item_id = item_id
+        data.pop("risk_id", None)
+        data.pop("opportunity_id", None)
+
+    for field, val in data.items():
         setattr(action, field, getattr(val, "value", val))
 
     action.updated_at = utcnow()
     action.version = int(action.version) + 1
     db.commit()
-    db.refresh(action)
-    return action
+
+    target_type = (
+        db.execute(select(Item.type).where(Item.id == action.item_id)).scalar()
+        or "risk"
+    )
+    return _action_out(action, target_type=target_type)
 
 
-@router.delete("/projects/{project_id}/actions/{action_id}", status_code=204)
+@router.delete(
+    "/projects/{project_id}/actions/{action_id}",
+    status_code=204,
+    response_class=Response,
+)
 def delete_action(
     project_id: uuid.UUID,
     action_id: uuid.UUID,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> None:
+) -> Response:
     require_min_role(db, project_id, user.id, min_role=Role.manager)
-    return delete_item(db, project_id, action_id, Action)
+    delete_item(db, project_id, action_id, Action)
+    return Response(status_code=204)

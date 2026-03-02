@@ -4,7 +4,7 @@ import uuid
 from collections import Counter
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -53,15 +53,20 @@ def create_item(db: Session, user_id: uuid.UUID, project_id: uuid.UUID, payload,
     return item
 
 
-def update_item(db: Session, project_id: uuid.UUID, item_id: uuid.UUID, payload, Model):
+def update_item(
+    db: Session,
+    project_id: uuid.UUID,
+    item_id: uuid.UUID,
+    payload,
+    Model,
+    *,
+    item_type: str | None = None,
+):
     now = utcnow()
-    item = (
-        db.execute(
-            select(Model).where(Model.project_id == project_id, Model.id == item_id)
-        )
-        .scalars()
-        .first()
-    )
+    where = [Model.project_id == project_id, Model.id == item_id]
+    if item_type and hasattr(Model, "type"):
+        where.append(Model.type == item_type)
+    item = db.execute(select(Model).where(*where)).scalars().first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
@@ -75,8 +80,21 @@ def update_item(db: Session, project_id: uuid.UUID, item_id: uuid.UUID, payload,
     if update_data.get("code"):
         update_data["code"] = str(update_data["code"]).strip()
 
+    # Guardrails: avoid writing NULLs into NOT NULL columns.
+    # Pydantic treats explicit `null` as "provided", so without this, a caller
+    # could accidentally trigger a 500/IntegrityError instead of a clean 4xx.
+    non_nullable = {
+        "title",
+        "probability",
+        "impact",
+        "status",
+        "identified_at",
+    }
+
     for field, val in update_data.items():
         v = getattr(val, "value", val)
+        if field in non_nullable and v is None:
+            raise HTTPException(status_code=422, detail=f"{field} cannot be null")
         if field == "status":
             item.change_status(v, now)
         else:
@@ -118,14 +136,18 @@ def list_items(db: Session, project_id: uuid.UUID, Model, filters: dict):
     return db.execute(stmt).scalars().all()
 
 
-def delete_item(db: Session, project_id: uuid.UUID, item_id: uuid.UUID, Model):
-    item = (
-        db.execute(
-            select(Model).where(Model.project_id == project_id, Model.id == item_id)
-        )
-        .scalars()
-        .first()
-    )
+def delete_item(
+    db: Session,
+    project_id: uuid.UUID,
+    item_id: uuid.UUID,
+    Model,
+    *,
+    item_type: str | None = None,
+):
+    where = [Model.project_id == project_id, Model.id == item_id]
+    if item_type and hasattr(Model, "type"):
+        where.append(Model.type == item_type)
+    item = db.execute(select(Model).where(*where)).scalars().first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     item.soft_delete(utcnow())
@@ -137,16 +159,26 @@ def generate_report(
     db: Session, project_id: uuid.UUID, Model, filters: dict
 ) -> ScoreReportOut:
 
+    # NOTE: Reports must be computed over the *entire* filtered dataset.
+    # The previous implementation accidentally used the list endpoint's
+    # limit/offset (pagination), which made reports incorrect for projects
+    # with >limit rows.
+
+    item_type = filters.get("item_type")
+    status = filters.get("status")
+
+    # "project_total" is a lightweight "how many items exist" figure
+    # for the given project+type, respecting only the status/deleted filter.
     project_total = int(
         db.execute(
             apply_item_filters(
                 select(func.count(Model.id)).where(Model.project_id == project_id),
                 Model,
                 search=None,
-                item_type=filters.get("item_type"),
+                item_type=item_type,
                 min_score=None,
                 max_score=None,
-                status=filters.get("status"),
+                status=status,
                 category=None,
                 owner_user_id=None,
                 from_date=None,
@@ -156,37 +188,119 @@ def generate_report(
         or 0
     )
 
-    rows = list_items(db, project_id, Model, filters)
-    total = len(rows)
-    scores = [r.score for r in rows]
-    mn = min(scores) if scores else None
-    mx = max(scores) if scores else None
-    avg = (sum(scores) / total) if total else None
+    # Full filtered stats (no pagination).
+    stats_row = db.execute(
+        apply_item_filters(
+            select(
+                func.count(Model.id),
+                func.min(Model.score),
+                func.max(Model.score),
+                func.avg(Model.score),
+            ).where(Model.project_id == project_id),
+            Model,
+            search=filters.get("search"),
+            item_type=item_type,
+            min_score=filters.get("min_score"),
+            max_score=filters.get("max_score"),
+            status=status,
+            category=filters.get("category"),
+            owner_user_id=filters.get("owner_user_id"),
+            from_date=filters.get("from_date"),
+            to_date=filters.get("to_date"),
+        )
+    ).one()
 
-    status_counts = Counter()
-    category_counts = Counter()
-    owner_counts = Counter()
-    buckets = Counter({"0-4": 0, "5-9": 0, "10-14": 0, "15-19": 0, "20-25": 0})
+    total = int(stats_row[0] or 0)
+    mn = int(stats_row[1]) if stats_row[1] is not None else None
+    mx = int(stats_row[2]) if stats_row[2] is not None else None
+    avg = float(stats_row[3]) if stats_row[3] is not None else None
 
-    for r in rows:
-        status_counts[r.status or RiskStatus.concept.value] += 1
-        category_counts[r.category or "(none)"] += 1
-        owner = str(r.owner_user_id) if r.owner_user_id else "(none)"
-        owner_counts[owner] += 1
+    # Group counts (still respecting the same filters).
+    status_counts = {
+        str(st or RiskStatus.concept.value): int(cnt or 0)
+        for st, cnt in db.execute(
+            apply_item_filters(
+                select(Model.status, func.count(Model.id)).where(
+                    Model.project_id == project_id
+                ),
+                Model,
+                search=filters.get("search"),
+                item_type=item_type,
+                min_score=filters.get("min_score"),
+                max_score=filters.get("max_score"),
+                status=status,
+                category=filters.get("category"),
+                owner_user_id=filters.get("owner_user_id"),
+                from_date=filters.get("from_date"),
+                to_date=filters.get("to_date"),
+            ).group_by(Model.status)
+        ).all()
+    }
 
-        # Optimalizace určování rozsahů skóre
-        if r.score <= 4:
-            b = "0-4"
-        elif r.score <= 9:
-            b = "5-9"
-        elif r.score <= 14:
-            b = "10-14"
-        elif r.score <= 19:
-            b = "15-19"
-        else:
-            b = "20-25"
+    category_counts = {}
+    for cat, cnt in db.execute(
+        apply_item_filters(
+            select(Model.category, func.count(Model.id)).where(
+                Model.project_id == project_id
+            ),
+            Model,
+            search=filters.get("search"),
+            item_type=item_type,
+            min_score=filters.get("min_score"),
+            max_score=filters.get("max_score"),
+            status=status,
+            category=filters.get("category"),
+            owner_user_id=filters.get("owner_user_id"),
+            from_date=filters.get("from_date"),
+            to_date=filters.get("to_date"),
+        ).group_by(Model.category)
+    ).all():
+        category_counts[cat or "(none)"] = int(cnt or 0)
 
-        buckets[b] += 1
+    owner_counts = {}
+    for owner_id, cnt in db.execute(
+        apply_item_filters(
+            select(Model.owner_user_id, func.count(Model.id)).where(
+                Model.project_id == project_id
+            ),
+            Model,
+            search=filters.get("search"),
+            item_type=item_type,
+            min_score=filters.get("min_score"),
+            max_score=filters.get("max_score"),
+            status=status,
+            category=filters.get("category"),
+            owner_user_id=filters.get("owner_user_id"),
+            from_date=filters.get("from_date"),
+            to_date=filters.get("to_date"),
+        ).group_by(Model.owner_user_id)
+    ).all():
+        owner_counts[str(owner_id) if owner_id else "(none)"] = int(cnt or 0)
+
+    bucket = case(
+        (Model.score <= 4, "0-4"),
+        (Model.score <= 9, "5-9"),
+        (Model.score <= 14, "10-14"),
+        (Model.score <= 19, "15-19"),
+        else_="20-25",
+    )
+    buckets = {"0-4": 0, "5-9": 0, "10-14": 0, "15-19": 0, "20-25": 0}
+    for b, cnt in db.execute(
+        apply_item_filters(
+            select(bucket, func.count(Model.id)).where(Model.project_id == project_id),
+            Model,
+            search=filters.get("search"),
+            item_type=item_type,
+            min_score=filters.get("min_score"),
+            max_score=filters.get("max_score"),
+            status=status,
+            category=filters.get("category"),
+            owner_user_id=filters.get("owner_user_id"),
+            from_date=filters.get("from_date"),
+            to_date=filters.get("to_date"),
+        ).group_by(bucket)
+    ).all():
+        buckets[str(b)] = int(cnt or 0)
 
     return ScoreReportOut(
         total=total,
@@ -194,8 +308,8 @@ def generate_report(
         min_score=mn,
         max_score=mx,
         avg_score=avg,
-        status_counts=dict(status_counts),
-        category_counts=dict(category_counts),
-        owner_counts=dict(owner_counts),
-        score_buckets=dict(buckets),
+        status_counts=status_counts,
+        category_counts=category_counts,
+        owner_counts=owner_counts,
+        score_buckets=buckets,
     )
