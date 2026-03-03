@@ -120,6 +120,9 @@ def scored_entity_from_mapping(
     if not data:
         raise ValueError("empty scored entity mapping")
 
+    # Convert sqlite3.Row to a standard dict so .get() works safely
+    data = dict(data)
+
     eid = str(data.get("id") or "").strip()
     pid = str(data.get("project_id") or "").strip()
     if not eid or not pid:

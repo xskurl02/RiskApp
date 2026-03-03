@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (  # pylint: disable=no-name-in-module
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QSplitter,
@@ -188,8 +189,9 @@ class ScoredEntitiesTab(QWidget):
         card_layout = QHBoxLayout(self.table_card)
         card_layout.setContentsMargins(16, 12, 12, 12)
         card_layout.setSpacing(0)
-        card_layout.addWidget(self.table, 0, Qt.AlignLeft | Qt.AlignTop)
-        card_layout.addStretch(1)
+        # card_layout.addWidget(self.table, 0, Qt.AlignLeft | Qt.AlignTop)
+        # card_layout.addStretch(1)
+        card_layout.addWidget(self.table)
 
         self.table_card.setStyleSheet("""
             #table_card {
@@ -235,8 +237,13 @@ class ScoredEntitiesTab(QWidget):
         hdr.addWidget(self.new_btn)
 
         editor_layout.addLayout(hdr)
-        editor_layout.addWidget(self.form)
-        self.editor_card.setFixedHeight(self.editor_card.sizeHint().height())
+        # editor_layout.addWidget(self.form)
+        # self.editor_card.setFixedHeight(self.editor_card.sizeHint().height())
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setWidget(self.form)
+        editor_layout.addWidget(self.scroll_area)
 
         split = QSplitter(Qt.Vertical)
         split.setChildrenCollapsible(False)
@@ -286,7 +293,7 @@ class ScoredEntitiesTab(QWidget):
 
         # Prefer stable ordering.
         try:
-            sorted_members = sorted(members or [], key=lambda m: (m.email or ""))
+            sorted_members = sorted(members or [], key=lambda m: m.email or "")
         except Exception:
             sorted_members = list(members or [])
 

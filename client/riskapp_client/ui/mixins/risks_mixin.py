@@ -38,7 +38,7 @@ class RisksMixin(ScoredEntityMixin):
 
         self._risks_last_pid = pid
 
-    def _refresh_risks(self, select_risk_id: str | None = None) -> None:
+    def _refresh_risks(self, select_id: str | None = None) -> None:
         pid = self.current_project_id
         if not pid:
             return
@@ -62,7 +62,7 @@ class RisksMixin(ScoredEntityMixin):
             filters_dict,
             self._mk_item,
             getattr(self.backend, "risks_report", None),
-            select_risk_id,
+            select_id,
         )
         if res is not None:
             self._risk_cache = res
@@ -149,7 +149,7 @@ class RisksMixin(ScoredEntityMixin):
             self.risks_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         self.risks_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.risks_table.setFixedSize(w, h)
+        # self.risks_table.setFixedSize(w, h)
 
         self._table_card.setMinimumHeight(0)
         self._table_card.setMaximumHeight(16777215)
@@ -158,7 +158,7 @@ class RisksMixin(ScoredEntityMixin):
         self._editor_dirty = True
 
     def _commit_editor_changes(
-        self, *, refresh: bool, select_risk_id: str | None = None
+        self, *, refresh: bool, select_id: str | None = None
     ) -> None:
         def ref_cb(select_id):
             self._refresh_risks(select_id)
@@ -171,7 +171,7 @@ class RisksMixin(ScoredEntityMixin):
             self.risk_form,
             self.backend.update_risk,
             ref_cb if refresh else None,
-            select_risk_id,
+            select_id,
         ):
             self._editor_dirty = False
 

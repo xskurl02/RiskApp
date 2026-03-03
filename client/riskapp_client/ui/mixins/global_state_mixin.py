@@ -214,13 +214,15 @@ class CoreMixin:
                 return
 
     def _call_backend(
-        self, title: str, fn: Callable[..., T], *args: Any, **kwargs: Any
+        self, error_title: str, fn: Callable[..., T], *args: Any, **kwargs: Any
+        #self, title: str, fn: Callable[..., T], *args: Any, **kwargs: Any
     ) -> T | None:
         """Call a backend function and show a modal error if it fails."""
         try:
             return fn(*args, **kwargs)
         except Exception as exc:
-            QMessageBox.critical(self, title, str(exc))
+            QMessageBox.critical(self, error_title, str(exc))
+            #QMessageBox.critical(self, title, str(exc))
             return None
 
     def _update_scored_filter_report(

@@ -288,24 +288,28 @@ class RiskForm(QWidget):
 
         # --- Rich text fields ---
         self.description = QTextEdit()
+        self.description.setMaximumHeight(80)
         self.description.setPlaceholderText("Detailed description / link to doc…")
         self.description.setToolTip(
             "Popis. More detailed description, assumptions, context and references."
         )
 
         self.threat = QTextEdit()
+        self.description.setMaximumHeight(80)
         self.threat.setPlaceholderText("Root cause…")
         self.threat.setToolTip(
             "Hrozba. Root cause / primary driver behind the risk/opportunity."
         )
 
         self.triggers = QTextEdit()
+        self.description.setMaximumHeight(80)
         self.triggers.setPlaceholderText("Indicators / triggers…")
         self.triggers.setToolTip(
             "Spouštěče. Observable indicators that the event is happening/likely."
         )
 
         self.mitigation_plan = QTextEdit()
+        self.description.setMaximumHeight(80)
         self.mitigation_plan.setPlaceholderText("Response / mitigation plan…")
         self.mitigation_plan.setToolTip(
             "Reakce/Opatření. Planned response (mitigation/contingency/exploit)."

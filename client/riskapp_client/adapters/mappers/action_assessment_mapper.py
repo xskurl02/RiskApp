@@ -52,6 +52,7 @@ def _opt_int(
 def action_from_mapping(data: Mapping[str, Any]) -> Action:
     """Create an Action from an API/SQLite mapping."""
 
+    data = dict(data)
     return Action(
         id=_req_str(data, "id"),
         project_id=_req_str(data, "project_id"),
@@ -70,6 +71,8 @@ def action_from_mapping(data: Mapping[str, Any]) -> Action:
 
 def assessment_from_mapping(data: Mapping[str, Any]) -> Assessment:
     """Create an Assessment from an API/SQLite mapping."""
+
+    data = dict(data)
 
     # Server endpoints can expose assessments in a few shapes:
     # - /risks/{id}/assessments uses the legacy field name `risk_id`.

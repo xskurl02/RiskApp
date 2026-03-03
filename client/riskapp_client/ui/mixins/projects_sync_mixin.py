@@ -17,9 +17,9 @@ from PySide6.QtWidgets import (  # pylint: disable=no-name-in-module
 class ProjectsSyncMixin:
     """MainWindow mixin: ProjectsSyncMixin"""
 
-    def _refresh_all_views(self, *, select_risk_id: str | None = None) -> None:
+    def _refresh_all_views(self, *, select_id: str | None = None) -> None:
         """Refresh all project-scoped tabs from the backend/local store."""
-        self._refresh_risks(select_risk_id=select_risk_id)
+        self._refresh_risks(select_id=select_id)
         for fn in (
             self._refresh_action_risk_combo,
             self._refresh_actions,
@@ -135,7 +135,7 @@ class ProjectsSyncMixin:
             self.current_project_id = str(migrated_to)
 
         # refresh UI from local store after sync
-        self._refresh_all_views(select_risk_id=self.current_risk_id)
+        self._refresh_all_views(select_id=self.current_risk_id)
 
         QMessageBox.information(
             self,
