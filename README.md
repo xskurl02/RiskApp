@@ -1,72 +1,51 @@
-# RiskApp (Server + Offline-First Desktop Client)
+# RiskApp (Server + Desktop Client)
 
 This repository contains:
-- **`riskapp_server/`**: FastAPI backend (JWT auth, RBAC per project, offline sync)
-- **`riskapp_client/`**: Qt (PySide6) desktop client with local SQLite + outbox sync
 
-## Quick start (recommended)
+- `server/` – FastAPI backend (risk/opportunity register, auth, RBAC, matrix, snapshots, offline sync)
+- `client/` – PySide6 desktop client (offline-first SQLite cache + outbox sync)
 
-### 1) Create a virtualenv
+## Quickstart
+
+### 1) Start the server
 
 ```bash
+cd server
 python -m venv .venv
-# Linux/macOS
 source .venv/bin/activate
-# Windows
-# .venv\\Scripts\\activate
+python -m pip install -r requirements.txt
+
+uvicorn riskapp_server.main.app:app --reload
 ```
 
-### 2) Install dependencies
+Create an initial user:
 
-Server only:
 ```bash
-pip install -r requirements-server.txt
+curl -X POST http://localhost:8000/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.com","password":"change-this-password"}'
 ```
 
-Server + client:
-```bash
-pip install -r requirements-client.txt
-```
-
-Or editable install (packaging):
-```bash
-pip install -e .
-# client deps
-pip install -e ".[client]"
-```
-
-## Run the server
+### 2) Start the desktop client
 
 ```bash
-uvicorn riskapp_server.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Environment variables (optional):
-- `DATABASE_URL` (default: `sqlite+pysqlite:///./riskapp.db`)
-- `SECRET_KEY` (recommended to set for any real deployment)
-- `ENV=production` (enables stricter security expectations)
-
-## Run the client
-
-```bash
-# optional (avoids typing credentials every time)
-export RISKAPP_URL="http://localhost:8000"
-export RISKAPP_EMAIL="you@example.com"
-export RISKAPP_PASSWORD="yourpassword"
+cd ../client
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 
 python -m riskapp_client.app
 ```
 
-The client will:
-- start online if the server is reachable and credentials are valid
-- otherwise fall back to offline mode (local cache + outbox)
-
 ## Notes
 
-- Authentication endpoints:
-  - `POST /register` (JSON: `{email, password}`)
-  - `POST /login` (form: `username`, `password`)
-- Project membership roles: `viewer < member < manager < admin`
-- Offline sync endpoints:
-  - `POST /projects/{project_id}/sync/pull`
-  - `POST /projects/{project_id}/sync/push`
+- Offline-first: the client writes to local SQLite first, then syncs via push/pull.
+- Roles: `viewer < member < manager < admin`. The server enforces access; the client uses roles mostly for UX.
+
+## QA / Unit tests / Tooling
+
+Developer tooling and unit tests are intentionally kept **outside** both `server/` and `client/`:
+
+- `qa/` – pytest unit tests + black/ruff configs + helper scripts
+
+See `qa/README_QA.md`.

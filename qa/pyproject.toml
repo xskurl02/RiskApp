@@ -1,0 +1,42 @@
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+extend-exclude = """
+(
+  /\\.venv
+  | /\\.git
+  | /__pycache__
+)
+"""
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+extend-exclude = [".venv", ".git", "__pycache__"]
+
+[tool.ruff.lint]
+select = [
+  "E", "F",   # pycodestyle/pyflakes
+  "I",        # import sorting
+  "B",        # bugbear
+  "UP",       # pyupgrade
+  "SIM",      # simplify
+]
+ignore = [
+  "E501",     # line length handled by black
+]
+
+[tool.ruff.lint.per-file-ignores]
+"qa/tests/**/*.py" = [
+  "S101",     # allow assert in tests
+]
+
+# FastAPI uses `Depends(...)` in function signatures by design.
+# Ruff's B008 rule flags this pattern, but it is idiomatic and safe here.
+"server/riskapp_server/api/routers/**/*.py" = ["B008"]
+"server/riskapp_server/auth/service.py" = ["B008"]

@@ -1,0 +1,5 @@
+# One-shot install for running unit tests + tooling.
+
+-r ../server/requirements.txt
+-r ../client/requirements.txt
+-r requirements-dev.txt

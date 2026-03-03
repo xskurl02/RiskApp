@@ -1,0 +1,12 @@
+# Development / test-only dependencies.
+#
+# Keep these separate from runtime requirements:
+# - server/requirements.txt
+# - client/requirements.txt
+
+pytest>=8.0
+pytest-asyncio>=0.23
+httpx>=0.27
+
+ruff>=0.5
+black>=24.0
