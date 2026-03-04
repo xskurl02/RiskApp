@@ -66,7 +66,7 @@ class OpportunitiesMixin(ScoredEntityMixin):
         if res is not None:
             self._opp_cache = res
             self._opp_title_by_id = {o.id: o.title for o in res.values()}
-        self.opps_table.resizeColumnsToContents()
+        #self.opps_table.resizeColumnsToContents()
 
     def _on_opportunity_clicked(self, row: int, col: int) -> None:
         new_id = self._on_entity_clicked(

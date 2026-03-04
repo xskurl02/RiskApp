@@ -94,7 +94,9 @@ class CoreMixin:
         pid = self.current_project_id
 
         role_for_local = self._role_for_local_edits()
-        assumed_member_offline = bool(self._offline_mode and self.current_role == "unknown")
+        assumed_member_offline = bool(
+            self._offline_mode and self.current_role == "unknown"
+        )
 
         can_edit_local = bool(pid) and role_at_least(role_for_local, "member")
         can_take_snapshots = (
@@ -214,15 +216,19 @@ class CoreMixin:
                 return
 
     def _call_backend(
-        self, error_title: str, fn: Callable[..., T], *args: Any, **kwargs: Any
-        #self, title: str, fn: Callable[..., T], *args: Any, **kwargs: Any
+        self,
+        error_title: str,
+        fn: Callable[..., T],
+        *args: Any,
+        **kwargs: Any,
+        # self, title: str, fn: Callable[..., T], *args: Any, **kwargs: Any
     ) -> T | None:
         """Call a backend function and show a modal error if it fails."""
         try:
             return fn(*args, **kwargs)
         except Exception as exc:
             QMessageBox.critical(self, error_title, str(exc))
-            #QMessageBox.critical(self, title, str(exc))
+            # QMessageBox.critical(self, title, str(exc))
             return None
 
     def _update_scored_filter_report(
@@ -400,3 +406,26 @@ class CoreMixin:
         """
         secs = int(w.dateTime().toSecsSinceEpoch())
         return datetime.utcfromtimestamp(secs).replace(microsecond=0).isoformat()
+
+    def _fit_table_to_contents(
+        self, table: QTableWidget, max_height: int = 500
+    ) -> None:
+        """Dynamically shrink the table border to exactly wrap its rows/columns."""
+        table.resizeColumnsToContents()
+        table.resizeRowsToContents()
+        hh = table.horizontalHeader()
+        vh = table.verticalHeader()
+        border_px = 2
+        w = hh.length() + border_px
+        h = hh.height() + vh.length() + border_px
+
+        if h > max_height:
+            h = max_height
+            table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            # w += table.verticalScrollBar().sizeHint().width()
+        else:
+            table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        table.setFixedHeight(h)
+        table.setMinimumWidth(w)

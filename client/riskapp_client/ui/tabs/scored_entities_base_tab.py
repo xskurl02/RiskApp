@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (  # pylint: disable=no-name-in-module
     QTableWidget,
     QVBoxLayout,
     QWidget,
+    QAbstractScrollArea
 )
 
 from riskapp_client.domain.scored_entity_fields import ALL_STATUSES
@@ -161,7 +162,10 @@ class ScoredEntitiesTab(QWidget):
         hh = self.table.horizontalHeader()
         hh.setSectionsClickable(False)
         hh.setHighlightSections(False)
-        hh.setStretchLastSection(False)
+        #hh.setStretchLastSection(False)
+        hh.setStretchLastSection(True)
+        hh.setSectionResizeMode(QHeaderView.ResizeToContents)
+        #hh.setSectionResizeMode(1, QHeaderView.Stretch) # Stretch title to fix truncation
         hh.setSectionResizeMode(QHeaderView.Interactive)
         hh.setDefaultAlignment(Qt.AlignCenter)
 
@@ -169,6 +173,9 @@ class ScoredEntitiesTab(QWidget):
         self.table.setCornerButtonEnabled(False)
 
         self.table.setShowGrid(False)
+        self.table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
+        self.table.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        #self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         self.table.setStyleSheet("""
             QTableWidget {
                 border: 1px solid #d0d0d0;
@@ -186,12 +193,15 @@ class ScoredEntitiesTab(QWidget):
         if on_fit_table_card:
             hh.sectionResized.connect(lambda *_: on_fit_table_card())
 
-        card_layout = QHBoxLayout(self.table_card)
+        #card_layout = QHBoxLayout(self.table_card)
+        card_layout = QVBoxLayout(self.table_card)
         card_layout.setContentsMargins(16, 12, 12, 12)
         card_layout.setSpacing(0)
-        # card_layout.addWidget(self.table, 0, Qt.AlignLeft | Qt.AlignTop)
-        # card_layout.addStretch(1)
+        #card_layout.addWidget(self.table, 0, Qt.AlignTop)
         card_layout.addWidget(self.table)
+        card_layout.addStretch(1)
+        # card_layout.addStretch(1)
+        #card_layout.addWidget(self.table)
 
         self.table_card.setStyleSheet("""
             #table_card {
@@ -207,6 +217,9 @@ class ScoredEntitiesTab(QWidget):
         self.form = RiskForm(on_save_item)
         self.new_btn = QPushButton(f"New {entity_label_singular}")
         self.new_btn.clicked.connect(on_new_item)
+
+        # Add a slight gap on the right so the scrollbar isn't flush with the inputs
+        self.form.setContentsMargins(0, 0, 16, 0)
 
         # dirty tracking hooks
         self.form.title.textEdited.connect(on_mark_dirty)
@@ -225,7 +238,7 @@ class ScoredEntitiesTab(QWidget):
                 background: white;
             }
             """)
-        self.editor_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.editor_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         editor_layout = QVBoxLayout(self.editor_card)
         editor_layout.setContentsMargins(16, 12, 12, 12)
@@ -251,8 +264,9 @@ class ScoredEntitiesTab(QWidget):
         split.addWidget(self.table_card)
         split.addWidget(self.editor_card)
         split.setStretchFactor(0, 1)
-        split.setStretchFactor(1, 0)
-        split.setSizes([600, 240])
+        split.setStretchFactor(1, 1)
+        split.setSizes([400, 400])
+        #split.setSizes([600, 240])
 
         split.setStyleSheet("""
             QSplitter::handle:horizontal {

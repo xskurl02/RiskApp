@@ -4,19 +4,27 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (  # pylint: disable=no-name-in-module
+    QAbstractScrollArea,
     QAbstractItemView,
     QComboBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
+    QSplitter,
     QTableWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+from riskapp_client.ui.components.custom_gui_widgets import CrispHeader, setup_readonly_table
 
 
 class ActionsTab(QWidget):
@@ -39,13 +47,57 @@ class ActionsTab(QWidget):
         self.actions_table.setHorizontalHeaderLabels(
             ["Title", "Kind", "Status", "Target", "Owner"]
         )
-        self.actions_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.actions_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.actions_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        setup_readonly_table(self.actions_table)
         self.actions_table.cellClicked.connect(on_action_clicked)
 
-        layout.addWidget(QLabel("Actions (mitigation/contingency/exploit)"))
-        layout.addWidget(self.actions_table)
+        self.actions_table.verticalHeader().setVisible(False)
+        self.actions_table.setCornerButtonEnabled(False)
+        # Make the table frame wrap the columns (like Risks/Opportunities).
+        self.actions_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
+        self.actions_table.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Expanding)
+
+        self.actions_table.setShowGrid(False)
+        header = CrispHeader(Qt.Horizontal, self.actions_table, line_color="#d0d0d0")
+        self.actions_table.setHorizontalHeader(header)
+
+        hh = self.actions_table.horizontalHeader()
+        hh.setSectionsClickable(False)
+        hh.setHighlightSections(False)
+        hh.setDefaultAlignment(Qt.AlignCenter)
+        # Don't stretch sections to the full viewport; we want the frame to hug the columns.
+        hh.setStretchLastSection(False)
+        hh.setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.actions_table.setStyleSheet("""
+            QTableWidget {
+                border: 1px solid #d0d0d0;
+                border-radius: 0px;
+                background: white;
+                selection-background-color: transparent;
+                selection-color: black;
+            }
+        """)
+
+        title_label = QLabel("Actions (mitigation/contingency/exploit)")
+        layout.addWidget(title_label)
+
+        self.table_card = QFrame()
+        self.table_card.setObjectName("table_card")
+        self.table_card.setStyleSheet(
+            "#table_card { border: 1px solid #d0d0d0; border-radius: 8px; background: white; }"
+        )
+        card_layout = QVBoxLayout(self.table_card)
+        card_layout.setContentsMargins(16, 12, 12, 12)
+        card_layout.setSpacing(0)
+        card_layout.addWidget(self.actions_table, 1)
+        self.table_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.editor_card = QFrame()
+        self.editor_card.setObjectName("editor_card")
+        self.editor_card.setStyleSheet(
+            "#editor_card { border: 1px solid #d0d0d0; border-radius: 8px; background: white; }"
+        )
+        editor_layout = QVBoxLayout(self.editor_card)
+        editor_layout.setContentsMargins(16, 12, 12, 12)
 
         self.action_editor_label = QLabel("Editor (new action)")
 
@@ -86,8 +138,21 @@ class ActionsTab(QWidget):
         btns.addWidget(self.action_new_btn)
         btns.addStretch(1)
 
-        layout.addWidget(self.action_editor_label)
-        layout.addLayout(form)
-        layout.addLayout(btns)
+        editor_layout.addWidget(self.action_editor_label)
+        editor_layout.addLayout(form)
+        editor_layout.addLayout(btns)
+
+        split = QSplitter(Qt.Vertical)
+        split.setChildrenCollapsible(False)
+        split.addWidget(self.table_card)
+        split.addWidget(self.editor_card)
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 1)
+        split.setSizes([400, 400])
+        split.setStyleSheet(
+            "QSplitter::handle:vertical { background: transparent; border: none; }"
+        )
+
+        layout.addWidget(split)
 
         self.setLayout(layout)

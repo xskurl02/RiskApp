@@ -81,6 +81,7 @@ class LayoutMixin:
         left = QVBoxLayout()
         left.addWidget(QLabel("Projects"))
         self.project_list = QListWidget()
+        self.project_list.setMaximumWidth(220)
         self.project_list.itemSelectionChanged.connect(self._on_project_selected)
         left.addWidget(self.project_list)
 
@@ -120,7 +121,7 @@ class LayoutMixin:
         # Tab: Risks
         self.risks_tab = RisksTab(
             on_export_csv=self._export_risks_csv,
-            on_refresh=lambda: self._refresh_risks(select_risk_id=self.current_risk_id),
+            on_refresh=lambda: self._refresh_risks(select_id=self.current_risk_id),
             on_risk_clicked=self._on_risk_clicked,
             on_new_risk=self._start_new_risk,
             on_save_risk=self._save_risk,

@@ -23,7 +23,7 @@ class ProjectsSyncMixin:
         for fn in (
             self._refresh_action_risk_combo,
             self._refresh_actions,
-            self._maybe_expand_title_column,
+            #self._maybe_expand_title_column,
             self._refresh_matrix,
             self._refresh_top_history,
             self._refresh_assessments,
