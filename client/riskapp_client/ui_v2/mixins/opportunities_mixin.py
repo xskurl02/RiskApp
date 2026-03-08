@@ -66,7 +66,7 @@ class OpportunitiesMixin(ScoredEntityMixin):
         if res is not None:
             self._opp_cache = res
             self._opp_title_by_id = {o.id: o.title for o in res.values()}
-        #self.opps_table.resizeColumnsToContents()
+        # self.opps_table.resizeColumnsToContents()
 
     def _on_opportunity_clicked(self, row: int, col: int) -> None:
         new_id = self._on_entity_clicked(
@@ -83,6 +83,9 @@ class OpportunitiesMixin(ScoredEntityMixin):
         )
         if new_id:
             self.current_opportunity_id = new_id
+            self.opps_tab.delete_btn.setVisible(
+                True
+            )  # <--- Show button for existing items
             self._opp_editor_dirty = False
             self.current_assessment_item_type = "opportunity"
             self.current_assessment_item_id = new_id
@@ -92,6 +95,7 @@ class OpportunitiesMixin(ScoredEntityMixin):
         # Avoid losing edits when switching to a fresh item.
         self._commit_opp_editor_changes(refresh=True)
         self.current_opportunity_id = None
+        self.opps_tab.delete_btn.setVisible(False)
         self.current_assessment_item_id = None
         self.current_assessment_item_type = "opportunity"
         self.opp_editor_label.setText("Editor (new opportunity)")
@@ -119,3 +123,18 @@ class OpportunitiesMixin(ScoredEntityMixin):
             self.current_assessment_item_type = "opportunity"
             self.current_assessment_item_id = saved_id
             self._refresh_assessments()
+
+    def _delete_opportunity(self) -> None:
+        def refresh_all():
+            self._refresh_opportunities()
+            self._refresh_action_opp_combo()
+            self._refresh_actions()
+            # If your matrix tab also draws opportunities, uncomment the next line:
+            self._refresh_matrix()
+
+        self._delete_entity(
+            current_id=self.current_opportunity_id,
+            delete_backend_fn=self.backend.delete_opportunity,
+            refresh_fn=refresh_all,
+            start_new_fn=self._start_new_opportunity,
+        )

@@ -41,6 +41,11 @@ class ScoredEntityWiring:
 
     # Outbox queueing for the entity.
     queue_upsert_fn: Callable[[str, dict[str, Any]], None]
+    queue_delete_fn: Callable[[str, str], None]
+    discard_pending_changes_fn: Callable[[str, str], None]
+
+    # Local soft delete for the entity.
+    soft_delete_local_fn: Callable[[str], tuple[str, int]]
 
     # Optional offline code generator (R-001 / O-001).
     next_code_fn: Callable[[str], str] | None = None
@@ -160,6 +165,18 @@ class ScoredEntityService:
         )
         self._w.queue_upsert_fn(project_id, record)
         return self._w.model_cls(project_id=project_id, version=version, **record)
+
+    def delete(self, entity_id: str) -> None:
+        project_id, version = self._w.soft_delete_local_fn(entity_id)
+
+        # Entity was never synced to the server. Remote net effect should be
+        # no-op, so remove any queued local upsert/delete instead of sending a
+        # delete for an unknown remote entity.
+        if int(version) < 1:
+            self._w.discard_pending_changes_fn(project_id, entity_id)
+            return
+
+        self._w.queue_delete_fn(project_id, entity_id)
 
     def _ensure_code(self, project_id: str, code: Any, *, existing: Any) -> str | None:
         c = None

@@ -586,6 +586,12 @@ class ApiBackend:
         )
         return self._to_opportunity(j)
 
+    def delete_opportunity(self, project_id: str, opportunity_id: str) -> None:
+        self._req(
+            "DELETE",
+            f"/projects/{project_id}/opportunities/{opportunity_id}",
+        )
+
     def list_assessments(
         self, project_id: str, item_type: str, item_id: str
     ) -> list[Assessment]:
@@ -702,6 +708,9 @@ class ApiBackend:
             "PATCH", f"/projects/{project_id}/risks/{risk_id}", json_body=body
         )
         return self._to_risk(j)
+
+    def delete_risk(self, project_id: str, risk_id: str) -> None:
+        self._req("DELETE", f"/projects/{project_id}/risks/{risk_id}")
 
     def sync_pull(
         self,

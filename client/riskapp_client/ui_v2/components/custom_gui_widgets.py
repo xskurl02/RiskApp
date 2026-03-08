@@ -272,6 +272,26 @@ class RiskForm(QWidget):
         self.status.currentTextChanged.connect(self._on_status_changed)
         # -------------------------------
 
+    def track_dirty_state(self, callback) -> None:
+        """Connect all input fields to a callback so the app knows when the form has unsaved changes."""
+        for w in (self.code, self.title, self.category, self.document_url):
+            w.textChanged.connect(lambda *_: callback())
+            
+        for w in (self.description, self.threat, self.triggers, self.mitigation_plan):
+            w.textChanged.connect(callback)
+            
+        for w in (self.p, self.impact_cost, self.impact_time, self.impact_scope, self.impact_quality):
+            w.valueChanged.connect(lambda *_: callback())
+            
+        self.status.currentTextChanged.connect(lambda *_: callback())
+        self.owner_user_id.currentTextChanged.connect(lambda *_: callback())
+        
+        for w in (self.identified_at, self.response_at, self.occurred_at):
+            if hasattr(w, "dateTimeChanged"):
+                w.dateTimeChanged.connect(lambda *_: callback())
+            elif hasattr(w, "textChanged"):
+                w.textChanged.connect(lambda *_: callback())
+
     def set_allow_deleted_status(self, allowed: bool) -> None:
         """Enable/disable the 'deleted' lifecycle state in the dropdown.
 

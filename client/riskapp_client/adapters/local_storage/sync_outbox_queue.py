@@ -150,6 +150,21 @@ class OutboxStore:
         )
         self.conn.commit()
 
+    def discard_entity_changes(self, project_id: str, *, entity: str, entity_id: str) -> None:
+        """Drop queued pending/blocked changes for one entity.
+
+        Used when an entity was created locally and deleted before first sync:
+        the correct remote net effect is no-op.
+        """
+        self.conn.execute(
+            """
+            DELETE FROM outbox
+            WHERE project_id=? AND entity=? AND entity_id=? AND status IN (?, ?);
+            """,
+            (project_id, entity, str(entity_id), STATUS_PENDING, STATUS_BLOCKED),
+        )
+        self.conn.commit()
+
     def _queue_scored_upsert(
         self,
         project_id: str,
@@ -209,6 +224,18 @@ class OutboxStore:
             get_project_and_version=self._store.get_risk_project_and_version,
         )
 
+    def queue_risk_delete(self, project_id: str, risk_id: str) -> None:
+        _, ver = self._store.get_risk_project_and_version(risk_id)
+        base_v = ver if ver >= 1 else None
+        self._replace_outbox_entry(
+            project_id=project_id,
+            entity="risk",
+            op="delete",
+            entity_id=risk_id,
+            base_version=base_v,
+            record={"id": risk_id},
+        )
+
     def queue_opportunity_upsert(self, project_id: str, record: dict[str, Any]) -> None:
         """Queue an upsert for an opportunity record."""
         self._queue_scored_upsert(
@@ -216,6 +243,18 @@ class OutboxStore:
             entity="opportunity",
             record=record,
             get_project_and_version=self._store.get_opportunity_project_and_version,
+        )
+
+    def queue_opportunity_delete(self, project_id: str, opportunity_id: str) -> None:
+        _, ver = self._store.get_opportunity_project_and_version(opportunity_id)
+        base_v = ver if ver >= 1 else None
+        self._replace_outbox_entry(
+            project_id=project_id,
+            entity="opportunity",
+            op="delete",
+            entity_id=opportunity_id,
+            base_version=base_v,
+            record={"id": opportunity_id},
         )
 
     def queue_action_upsert(

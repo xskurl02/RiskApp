@@ -54,6 +54,11 @@ class OfflineFirstBackend(Backend):
                 get_row_fn=store.get_risk_row,
                 upsert_local_fn=store.upsert_local_risk,
                 queue_upsert_fn=self.outbox.queue_risk_upsert,
+                queue_delete_fn=self.outbox.queue_risk_delete,
+                discard_pending_changes_fn=lambda project_id, entity_id: self.outbox.discard_entity_changes(
+                    project_id, entity="risk", entity_id=entity_id
+                ),
+                soft_delete_local_fn=store.soft_delete_risk,
                 next_code_fn=store.next_risk_code,
             )
         )
@@ -67,6 +72,11 @@ class OfflineFirstBackend(Backend):
                 get_row_fn=store.get_opportunity_row,
                 upsert_local_fn=store.upsert_local_opportunity,
                 queue_upsert_fn=self.outbox.queue_opportunity_upsert,
+                queue_delete_fn=self.outbox.queue_opportunity_delete,
+                discard_pending_changes_fn=lambda project_id, entity_id: self.outbox.discard_entity_changes(
+                    project_id, entity="opportunity", entity_id=entity_id
+                ),
+                soft_delete_local_fn=store.soft_delete_opportunity,
                 next_code_fn=store.next_opportunity_code,
             )
         )
@@ -213,6 +223,9 @@ class OfflineFirstBackend(Backend):
             )
         return ent
 
+    def delete_risk(self, project_id: str, risk_id: str) -> None:
+        self._risks.delete(risk_id)
+
     # ---- Opportunities ----
 
     def list_opportunities(self, project_id: str) -> list[Opportunity]:
@@ -308,6 +321,9 @@ class OfflineFirstBackend(Backend):
                 base_version=base_version,
             )
         return ent
+
+    def delete_opportunity(self, project_id: str, opportunity_id: str) -> None:
+        self._opps.delete(opportunity_id)
 
     # ---- Actions ----
 

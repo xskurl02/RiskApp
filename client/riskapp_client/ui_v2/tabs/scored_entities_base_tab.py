@@ -108,7 +108,7 @@ class ScoredEntitiesTab(QWidget):
         # Index 0 is the editor card, Index 1 is the table card
         self.ui.splitter.setStretchFactor(0, 3)  # 20% stretch ratio
         self.ui.splitter.setStretchFactor(1, 7)  # 80% stretch ratio
-        self.ui.splitter.setSizes([25000, 75000]) # Absolute push to force the ratio
+        self.ui.splitter.setSizes([30000, 70000]) # Absolute push to force the ratio
         # -------------------------------------------
 
 
@@ -155,6 +155,11 @@ class ScoredEntitiesTab(QWidget):
         self.table = self.ui.table
         self.form = self.ui.form
         self.form.on_submit = on_save_item
+
+        # Wire up the dirty tracker to auto-save when clicking away
+        if hasattr(self.form, "track_dirty_state"):
+            self.form.track_dirty_state(on_mark_dirty)
+
 
         self.new_btn = self.ui.new_btn
         self.delete_btn = self.ui.delete_btn

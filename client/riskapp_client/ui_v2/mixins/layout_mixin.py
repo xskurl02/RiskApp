@@ -98,7 +98,12 @@ class LayoutMixin:
             on_risk_clicked=self._on_risk_clicked,
             on_new_risk=self._start_new_risk,
             on_save_risk=self._save_risk,
-            on_delete_item=lambda: logger.info("Delete Risk triggered"),
+            on_delete_item=lambda: self._delete_entity(
+                self.current_risk_id,
+                self.backend.delete_risk,
+                self._refresh_risks,
+                self._start_new_risk
+            ),
             on_mark_dirty=self._mark_editor_dirty,
             on_fit_table_card=lambda: self._fit_table_card(),
         )
@@ -113,7 +118,12 @@ class LayoutMixin:
             on_opportunity_clicked=self._on_opportunity_clicked,
             on_new_opportunity=self._start_new_opportunity,
             on_save_opportunity=self._save_opportunity,
-            on_delete_item=lambda: logger.info("Delete Opp triggered"),
+            on_delete_item=lambda: self._delete_entity(
+                self.current_opportunity_id,
+                self.backend.delete_opportunity,
+                self._refresh_opportunities,
+                self._start_new_opportunity
+            ),
             on_mark_dirty=self._mark_opp_editor_dirty,
         )
         self.ui.main_stacked_widget.addWidget(self.opps_tab)

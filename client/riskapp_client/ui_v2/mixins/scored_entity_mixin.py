@@ -181,6 +181,38 @@ class ScoredEntityMixin:
             refresh_fn(select_id=select_id or current_id)
         return True
 
+    def _delete_entity(
+        self, 
+        current_id: str | None, 
+        delete_backend_fn, 
+        refresh_fn, 
+        start_new_fn
+    ) -> None:
+        """Safely prompt the user and delete the entity."""
+        if not current_id:
+            return  # Nothing to delete
+            
+        pid = self.current_project_id
+        if not pid:
+            return
+
+        # 1. Ask for confirmation!
+        reply = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            "Are you sure you want to completely delete this item? This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            # 2. Call the backend to delete
+            self._call_backend("Backend error", delete_backend_fn, pid, current_id)
+            
+            # 3. Clear the form and refresh the table
+            start_new_fn()
+            refresh_fn()
+
     def _save_entity(
         self,
         payload,

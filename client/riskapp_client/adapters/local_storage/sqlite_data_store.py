@@ -414,6 +414,23 @@ class LocalStore:
             raise KeyError(f"{label} not found in local store")
         return str(row["project_id"]), int(row["version"])
 
+    def _soft_delete_scored(
+        self, table: str, entity_id: str, *, label: str
+    ) -> tuple[str, int]:
+        self._assert_scored_table(table)
+        row = self._get_scored_row(table, entity_id)
+        if not row:
+            raise KeyError(f"{label} not found in local store")
+
+        project_id = str(row["project_id"])
+        version = int(row["version"] or 0)
+        self.conn.execute(
+            f"UPDATE {table} SET is_deleted=1, dirty=1, updated_at=? WHERE id=?;",
+            (utc_iso(), entity_id),
+        )
+        self.conn.commit()
+        return project_id, version
+
     def _norm_scored_meta(self, meta: dict[str, Any]) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for k in SCORED_ENTITY_META_KEYS:
@@ -572,6 +589,9 @@ class LocalStore:
             dirty=dirty,
         )
 
+    def soft_delete_risk(self, risk_id: str) -> tuple[str, int]:
+        return self._soft_delete_scored("risks", risk_id, label="risk")
+
     def mark_risk_clean(self, risk_id: str) -> None:
         self.conn.execute("UPDATE risks SET dirty=0 WHERE id=?;", (risk_id,))
         self.conn.commit()
@@ -634,6 +654,11 @@ class LocalStore:
             is_deleted=is_deleted,
             updated_at=updated_at,
             dirty=dirty,
+        )
+
+    def soft_delete_opportunity(self, opportunity_id: str) -> tuple[str, int]:
+        return self._soft_delete_scored(
+            "opportunities", opportunity_id, label="opportunity"
         )
 
     def list_assessments(
