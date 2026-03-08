@@ -1,27 +1,21 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QRect, QSize, Qt  # pylint: disable=no-name-in-module
+from PySide6.QtCore import QRect, QSize, Qt, QDateTime  # pylint: disable=no-name-in-module
 from PySide6.QtGui import QColor, QPen  # pylint: disable=no-name-in-module
 from PySide6.QtWidgets import (  # pylint: disable=no-name-in-module
     QAbstractItemView,
-    QComboBox,
     QDialog,
-    QDialogButtonBox,
-    QFormLayout,
     QHeaderView,
-    QLineEdit,
     QMessageBox,
-    QPushButton,
-    QSizePolicy,
-    QSpinBox,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QTableWidget,
-    QTextEdit,
-    QVBoxLayout,
     QWidget,
 )  # pylint: disable=no-name-in-module
+
+from riskapp_client.ui_v2.components.ui_dialog import Ui_Dialog
+from riskapp_client.ui_v2.components.ui_risk_form import Ui_Form as Ui_RiskForm
 
 
 # -------------------------
@@ -32,32 +26,18 @@ class LoginDialog(QDialog):
         self, *, default_url: str = "http://localhost:8000", parent=None
     ) -> None:
         super().__init__(parent)
+        self.ui = Ui_Dialog()
+        self.ui.setupUi(self)
         self.setWindowTitle("Connect to server")
-
-        layout = QVBoxLayout(self)
-        form = QFormLayout()
-
-        self.url = QLineEdit(default_url)
-        self.email = QLineEdit()
-        self.password = QLineEdit()
-        self.password.setEchoMode(QLineEdit.Password)
-
-        form.addRow("Server URL", self.url)
-        form.addRow("Email", self.email)
-        form.addRow("Password", self.password)
-
-        layout.addLayout(form)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.ui.url.setText(default_url)
+        self.ui.buttonBox.accepted.connect(self.accept)
+        self.ui.buttonBox.rejected.connect(self.reject)
 
     def values(self) -> tuple[str, str, str]:
         return (
-            self.url.text().strip(),
-            self.email.text().strip(),
-            self.password.text(),
+            self.ui.url.text().strip(),
+            self.ui.email.text().strip(),
+            self.ui.password.text(),
         )
 
 
@@ -83,12 +63,25 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
         opt = QStyleOptionViewItem(option)
 
         # background
+
+        # --- DYNAMIC THEME COLORS ---
+        base_color = opt.palette.base().color()
+        text_color = opt.palette.text().color()
+        highlight_bg = opt.palette.highlight().color()
+        
+        grid_color = QColor(text_color)
+        grid_color.setAlpha(50)
+        # ----------------------------
+
         if opt.state & QStyle.State_Selected:
-            bg = QColor(230, 230, 230)
+            bg = highlight_bg
         elif opt.state & QStyle.State_MouseOver:
-            bg = QColor(245, 245, 245)
+            if base_color.lightness() > 128:
+                bg = base_color.darker(105) 
+            else:
+                bg = base_color.lighter(130)
         else:
-            bg = QColor("white")
+            bg = base_color
 
         painter.save()
         painter.fillRect(opt.rect, bg)
@@ -100,7 +93,7 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
 
             # separator line between number and title
             painter.save()
-            pen = QPen(QColor(208, 208, 208), 1)
+            pen = QPen(grid_color, 1)
             pen.setCosmetic(True)
             pen.setCapStyle(Qt.FlatCap)
             painter.setPen(pen)
@@ -112,7 +105,10 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
             # number (row index)
             num = str(index.row() + 1)
             painter.save()
-            painter.setPen(opt.palette.text().color())
+            if opt.state & QStyle.State_Selected:
+                painter.setPen(opt.palette.highlightedText().color())
+            else:
+                painter.setPen(text_color)
             painter.drawText(gutter.adjusted(0, 0, -1, 0), Qt.AlignCenter, num)
             painter.restore()
 
@@ -122,7 +118,10 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
             title_rect = rect.adjusted(self.GUTTER_W + pad, 0, -pad, 0)
 
             painter.save()
-            painter.setPen(opt.palette.text().color())
+            if opt.state & QStyle.State_Selected:
+                painter.setPen(opt.palette.highlightedText().color())
+            else:
+                painter.setPen(text_color)
             fm = opt.fontMetrics
             full_w = fm.horizontalAdvance(title)
             elided = fm.elidedText(title, Qt.ElideRight, max(0, title_rect.width()))
@@ -132,15 +131,23 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
             painter.drawText(title_rect, align, elided)
             painter.restore()
         else:
-            # default painting for other columns (but no blue selection)
-            opt.state &= ~QStyle.State_Selected
-            opt.state &= ~QStyle.State_MouseOver
-            super().paint(painter, opt, index)
+            # Bypass Qt's stubborn defaults and forcefully draw the text dead-center
+            val = index.data()
+            text = str(val) if val is not None else ""
+            
+            painter.save()
+            if opt.state & QStyle.State_Selected:
+                painter.setPen(opt.palette.highlightedText().color())
+            else:
+                painter.setPen(text_color)
+                
+            painter.drawText(opt.rect, Qt.AlignCenter, text)
+            painter.restore()
 
         # active cell border
         if opt.state & QStyle.State_HasFocus:
             painter.save()
-            pen = QPen(opt.palette.highlight().color(), 2)
+            pen = QPen(highlight_bg, 2)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(opt.rect.adjusted(1, 1, -1, -1))
@@ -148,7 +155,7 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
 
         # excel-like internal gridlines
         painter.save()
-        pen = QPen(QColor(208, 208, 208), 1)
+        pen = QPen(grid_color, 1)
         pen.setCosmetic(True)
         pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)
@@ -174,109 +181,54 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
 def setup_readonly_table(table: QTableWidget, *, excel_delegate: bool = False) -> None:
     """Apply standard readonly 'list table' behavior used across tabs.
 
-    Call-sites import this from ``riskapp_client.ui.components.custom_gui_widgets``.
+    Call-sites import this from ``riskapp_client.ui_v2.components.custom_gui_widgets``.
     """
     table.verticalHeader().setVisible(False)
     table.setEditTriggers(QAbstractItemView.NoEditTriggers)
     table.setSelectionBehavior(QAbstractItemView.SelectRows)
     table.setSelectionMode(QAbstractItemView.SingleSelection)
     table.setFocusPolicy(Qt.StrongFocus)
+    # 1. Turn OFF stretchLastSection so it doesn't override our equal stretch
+    table.horizontalHeader().setStretchLastSection(False)
+    # 2. Force EVERY column to stretch equally to fill the space
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
     if excel_delegate:
         table.setItemDelegate(ExcelSelectionDelegate(table))
 
 
 class RiskForm(QWidget):
-    """
-    Editor used for creating/updating a risk OR opportunity (same shape).
-    Calls on_submit(payload_dict).
-    """
-
     STATUS_CHOICES = ["concept", "active", "closed", "deleted", "happened"]
 
-    def __init__(self, on_submit) -> None:
-        super().__init__()
+    def __init__(self, parent=None, on_submit=None) -> None:
+        super().__init__(parent)
         self.on_submit = on_submit
         self._allow_deleted_status: bool = True
 
-        layout = QFormLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setHorizontalSpacing(18)
-        layout.setVerticalSpacing(10)
+        self.ui = Ui_RiskForm()
+        self.ui.setupUi(self)
 
-        # --- Core fields ---
-        self.code = QLineEdit()
-        self.code.setPlaceholderText(
-            "Optional (e.g. R-001 / O-001). Leave empty to auto-generate on server."
-        )
-        self.code.setToolTip(
-            "Označení (unique code). Used for searching/filtering in the register.\n"
-            "Tip: keep it short and stable (e.g. R-001)."
-        )
+        self.status = self.ui.status
+        self.owner_user_id = self.ui.owner_user_id
 
-        self.title = QLineEdit()
-        self.title.setToolTip("Název. Short, descriptive name of the risk/opportunity.")
-
-        self.category = QLineEdit()
-        self.category.setPlaceholderText("e.g. cost / time / scope / quality")
-        self.category.setToolTip(
-            "Kategorie. Helps grouping and reporting (e.g. cost, time, scope, quality)."
-        )
-
-        self.status = QComboBox()
-        self.status.setEditable(True)
-        self.status.addItems(self.STATUS_CHOICES)
-        self.status.setToolTip(
-            "Stav. Lifecycle state (concept/active/closed/deleted/happened).\n"
-            "Changing status updates 'status_changed_at' on the server."
-        )
-
-        # Owner / responsible person
-        # Use an editable combo populated from project members (still allows pasting a UUID manually).
-        self.owner_user_id = QComboBox()
-        self.owner_user_id.setEditable(True)
-        self.owner_user_id.addItem("(none)", None)
-        if self.owner_user_id.lineEdit():
-            self.owner_user_id.lineEdit().setPlaceholderText(
-                "Select member or paste UUID (optional)"
-            )
-        self.owner_user_id.setToolTip(
-            "Vlastník. Responsible person for monitoring/handling this item."
-        )
-
-        # --- Qualitative ---
-        self.p = QSpinBox()
-        self.p.setRange(1, 5)
-        self.p.setValue(3)
-        self.p.setToolTip(
-            "Pravděpodobnost (1-5). Qualitative likelihood of the event/opportunity."
-        )
-
-        # impact dimensions
-        self.impact_cost = QSpinBox()
-        self.impact_cost.setRange(1, 5)
-        self.impact_cost.setValue(3)
-        self.impact_cost.setToolTip("Dopad - Náklady (1-5).")
-        self.impact_time = QSpinBox()
-        self.impact_time.setRange(1, 5)
-        self.impact_time.setValue(3)
-        self.impact_time.setToolTip("Dopad - Čas (1-5).")
-        self.impact_scope = QSpinBox()
-        self.impact_scope.setRange(1, 5)
-        self.impact_scope.setValue(3)
-        self.impact_scope.setToolTip("Dopad - Rozsah (1-5).")
-        self.impact_quality = QSpinBox()
-        self.impact_quality.setRange(1, 5)
-        self.impact_quality.setValue(3)
-        self.impact_quality.setToolTip("Dopad - Kvalita (1-5).")
-
-        # overall impact (read-only, derived)
-        self.i = QSpinBox()
-        self.i.setRange(1, 5)
-        self.i.setValue(3)
-        self.i.setEnabled(False)
-        self.i.setToolTip(
-            "Celkový dopad (1-5). Derived as MAX(cost,time,scope,quality)."
-        )
+        self.code = self.ui.code
+        self.title = self.ui.title
+        self.category = self.ui.category
+        self.p = self.ui.p
+        self.impact_cost = self.ui.impact_cost
+        self.impact_time = self.ui.impact_time
+        self.impact_scope = self.ui.impact_scope
+        self.impact_quality = self.ui.impact_quality
+        self.i = self.ui.i
+        self.description = self.ui.description
+        self.threat = self.ui.threat
+        self.triggers = self.ui.triggers
+        self.mitigation_plan = self.ui.mitigation_plan
+        self.document_url = self.ui.document_url
+        self.identified_at = self.ui.identified_at
+        self.response_at = self.ui.response_at
+        self.occurred_at = self.ui.occurred_at
+        self.status_changed_at = self.ui.status_changed_at
+        self.btn = self.ui.btn
 
         for w in (
             self.impact_cost,
@@ -286,95 +238,39 @@ class RiskForm(QWidget):
         ):
             w.valueChanged.connect(self._recompute_overall_impact)
 
-        # --- Rich text fields ---
-        self.description = QTextEdit()
-        self.description.setMaximumHeight(80)
-        self.description.setPlaceholderText("Detailed description / link to doc…")
-        self.description.setToolTip(
-            "Popis. More detailed description, assumptions, context and references."
-        )
-
-        self.threat = QTextEdit()
-        self.description.setMaximumHeight(80)
-        self.threat.setPlaceholderText("Root cause…")
-        self.threat.setToolTip(
-            "Hrozba. Root cause / primary driver behind the risk/opportunity."
-        )
-
-        self.triggers = QTextEdit()
-        self.description.setMaximumHeight(80)
-        self.triggers.setPlaceholderText("Indicators / triggers…")
-        self.triggers.setToolTip(
-            "Spouštěče. Observable indicators that the event is happening/likely."
-        )
-
-        self.mitigation_plan = QTextEdit()
-        self.description.setMaximumHeight(80)
-        self.mitigation_plan.setPlaceholderText("Response / mitigation plan…")
-        self.mitigation_plan.setToolTip(
-            "Reakce/Opatření. Planned response (mitigation/contingency/exploit)."
-        )
-
-        self.document_url = QLineEdit()
-        self.document_url.setPlaceholderText("Optional link to document (URL)")
-        self.document_url.setToolTip(
-            "Odkaz na dokument. Optional URL to supporting documentation."
-        )
-
-        # --- Dates (ISO strings; empty allowed) ---
-        self.identified_at = QLineEdit()
-        self.identified_at.setPlaceholderText(
-            "ISO datetime or date (e.g. 2026-02-19 or 2026-02-19T10:00:00)"
-        )
-        self.identified_at.setToolTip(
-            "Datum identifikace. Leave empty to use 'now'. Accepts ISO date or datetime."
-        )
-
-        self.response_at = QLineEdit()
-        self.response_at.setPlaceholderText("ISO datetime/date (optional)")
-        self.response_at.setToolTip(
-            "Datum reakce. When the mitigation/response was applied (optional)."
-        )
-
-        self.occurred_at = QLineEdit()
-        self.occurred_at.setPlaceholderText("ISO datetime/date (optional)")
-        self.occurred_at.setToolTip(
-            "Datum události. When the risk event happened (optional)."
-        )
-
-        # status_changed_at is usually server-managed; keep hidden but present
-        self.status_changed_at = QLineEdit()
-        self.status_changed_at.setPlaceholderText(
-            "ISO datetime (auto when status changes)"
-        )
-        self.status_changed_at.setVisible(False)
-
-        layout.addRow("Code", self.code)
-        layout.addRow("Title", self.title)
-        layout.addRow("Category", self.category)
-        layout.addRow("Status", self.status)
-        layout.addRow("Owner user_id", self.owner_user_id)
-        layout.addRow("Probability (1-5)", self.p)
-        layout.addRow("Impact - Cost (1-5)", self.impact_cost)
-        layout.addRow("Impact - Time (1-5)", self.impact_time)
-        layout.addRow("Impact - Scope (1-5)", self.impact_scope)
-        layout.addRow("Impact - Quality (1-5)", self.impact_quality)
-        layout.addRow("Impact (overall, max)", self.i)
-        layout.addRow("Description", self.description)
-        layout.addRow("Threat", self.threat)
-        layout.addRow("Triggers", self.triggers)
-        layout.addRow("Mitigation/Response", self.mitigation_plan)
-        layout.addRow("Document URL", self.document_url)
-        layout.addRow("Identified at", self.identified_at)
-        layout.addRow("Response at", self.response_at)
-        layout.addRow("Occurred at", self.occurred_at)
-
-        self.btn = QPushButton("Save")
         self.btn.clicked.connect(self._submit)
-        self.btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        layout.addRow(self.btn)
+       
+        
+        # --- CONTEXT HELP (EDITOR FORM) ---
+        self.code.setToolTip("Code: A unique identifier or short reference")
+        self.title.setToolTip("Title: The name or brief summary")
+        self.category.setToolTip("Category: The classification or grouping")
+        self.status.setToolTip("Status: The current lifecycle state")
+        self.owner_user_id.setToolTip("Owner: The team member assigned to manage this")
+        self.description.setToolTip("Description: A detailed explanation of this item")
+        
+        self.p.setToolTip("Probability: The likelihood of this occurring (1-5)")
+        self.impact_cost.setToolTip("Cost Impact: Severity of financial impact (1-5)")
+        self.impact_time.setToolTip("Time Impact: Severity of schedule delay or acceleration (1-5)")
+        self.impact_scope.setToolTip("Scope Impact: Effect on project deliverables (1-5)")
+        self.impact_quality.setToolTip("Quality Impact: Effect on product standards (1-5)")
+        self.i.setToolTip("Overall Impact: Automatically calculated as the maximum of Cost, Time, Scope, and Quality")
+        
+        self.threat.setToolTip("Threat / Root Cause: What is the driving factor behind this?")
+        self.triggers.setToolTip("Triggers: What events or warning signs indicate this is actively happening?")
+        self.mitigation_plan.setToolTip("Action Plan: What are the steps to mitigate this risk or exploit this opportunity?")
+        self.document_url.setToolTip("A link to external documentation, a Jira ticket, or evidence")
+        
+        self.identified_at.setToolTip("Identified At: When this was first discovered")
+        self.response_at.setToolTip("Response At: When mitigation or exploitation began")
+        self.occurred_at.setToolTip("Occurred At: When the risk/opportunity actually happened")
+        self.status_changed_at.setToolTip("Status Changed At: Auto-recorded when the status is updated")
+        # ----------------------------------
 
-        self.setLayout(layout)
+        # --- AUTO-UPDATE STATUS DATE ---
+        self.status_changed_at.setEnabled(False)  # Aggressively lock the widget
+        self.status.currentTextChanged.connect(self._on_status_changed)
+        # -------------------------------
 
     def set_allow_deleted_status(self, allowed: bool) -> None:
         """Enable/disable the 'deleted' lifecycle state in the dropdown.
@@ -407,6 +303,17 @@ class RiskForm(QWidget):
 
         self.status.blockSignals(False)
 
+    def _set_date(self, widget, dt_str: str | None) -> None:
+        """Helper to safely write to a QDateTimeEdit."""
+        if hasattr(widget, "setDateTime"):
+            widget.setSpecialValueText("Not set") # Shows this when empty!
+            if dt_str:
+                widget.setDateTime(QDateTime.fromString(dt_str[:19], Qt.ISODate))
+            else:
+                widget.setDateTime(widget.minimumDateTime()) # Forces "Not set" to display
+        else:
+            widget.setText(dt_str or "")
+
     def set_editable(self, editable: bool) -> None:
         """Enable/disable editing while keeping fields readable.
 
@@ -425,7 +332,7 @@ class RiskForm(QWidget):
             self.identified_at,
             self.response_at,
             self.occurred_at,
-            self.status_changed_at,
+            #self.status_changed_at,
         ):
             w.setReadOnly(not editable)
 
@@ -510,6 +417,23 @@ class RiskForm(QWidget):
         )
         self.i.setValue(overall)
 
+    def _on_status_changed(self, text: str) -> None:
+        """Automatically stamp the current date/time when the status dropdown is modified."""
+        if hasattr(self.status_changed_at, "setDateTime"):
+            self.status_changed_at.setDateTime(QDateTime.currentDateTime())
+        else:
+            from datetime import datetime
+            self.status_changed_at.setText(datetime.now().strftime("%Y-%m-%dT%H:%M:%S"))
+            
+    def _read_date(self, widget) -> str | None:
+        """Helper to safely read from a QDateTimeEdit to prevent sending 'Not set' to DB."""
+        if hasattr(widget, "dateTime"):
+            if widget.dateTime() == widget.minimumDateTime():
+                return None
+            return widget.dateTime().toString(Qt.ISODate)
+        return widget.text().strip() or None
+
+
     def get_payload(self) -> dict:
         # no validation here (caller decides)
         self._recompute_overall_impact()
@@ -530,10 +454,10 @@ class RiskForm(QWidget):
             "triggers": (self.triggers.toPlainText().strip() or None),
             "mitigation_plan": (self.mitigation_plan.toPlainText().strip() or None),
             "document_url": (self.document_url.text().strip() or None),
-            "identified_at": (self.identified_at.text().strip() or None),
-            "status_changed_at": (self.status_changed_at.text().strip() or None),
-            "response_at": (self.response_at.text().strip() or None),
-            "occurred_at": (self.occurred_at.text().strip() or None),
+            "identified_at": self._read_date(self.identified_at),
+            "status_changed_at": self._read_date(self.status_changed_at),
+            "response_at": self._read_date(self.response_at),
+            "occurred_at": self._read_date(self.occurred_at),
         }
 
     def set_values(
@@ -613,11 +537,10 @@ class RiskForm(QWidget):
         self.mitigation_plan.setPlainText(mitigation_plan or "")
         self.document_url.setText(document_url or "")
 
-        self.identified_at.setText(identified_at or "")
-        self.status_changed_at.setText(status_changed_at or "")
-        self.response_at.setText(response_at or "")
-        self.occurred_at.setText(occurred_at or "")
-
+        self._set_date(self.identified_at, identified_at)
+        self._set_date(self.status_changed_at, status_changed_at)
+        self._set_date(self.response_at, response_at)
+        self._set_date(self.occurred_at, occurred_at)
         for w in widgets:
             w.blockSignals(False)
         self.owner_user_id.blockSignals(False)
@@ -635,15 +558,19 @@ class RiskForm(QWidget):
 
 
 class CrispHeader(QHeaderView):
-    def __init__(self, orientation, parent=None, line_color: str = "#d0d0d0") -> None:
+    def __init__(self, orientation, parent=None) -> None:
         super().__init__(orientation, parent)
-        self._pen = QPen(QColor(line_color), 1)
-        self._pen.setCosmetic(True)
 
     def paintSection(self, painter, rect, logicalIndex) -> None:
         super().paintSection(painter, rect, logicalIndex)
+
+        grid_color = QColor(self.palette().text().color())
+        grid_color.setAlpha(50)
+        pen = QPen(grid_color, 1)
+        pen.setCosmetic(True)
+
         painter.save()
-        painter.setPen(self._pen)
+        painter.setPen(pen)
         if logicalIndex < self.count() - 1:
             x = rect.right()
             painter.drawLine(x, rect.top(), x, rect.bottom())

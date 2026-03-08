@@ -1,16 +1,8 @@
-"""Opportunities tab widget.
-
-Thin wrapper around the shared ScoredEntitiesTab.
-"""
-
+"""Opportunities tab widget."""
 from __future__ import annotations
-
 from collections.abc import Callable
-
-from PySide6.QtWidgets import QWidget  # pylint: disable=no-name-in-module
-
-from riskapp_client.ui.tabs.scored_entities_base_tab import ScoredEntitiesTab
-
+from PySide6.QtWidgets import QWidget
+from riskapp_client.ui_v2.tabs.scored_entities_base_tab import ScoredEntitiesTab
 
 class OpportunitiesTab(ScoredEntitiesTab):
     """Opportunities list + editor tab."""
@@ -23,6 +15,7 @@ class OpportunitiesTab(ScoredEntitiesTab):
         on_opportunity_clicked: Callable[[int, int], None],
         on_new_opportunity: Callable[[], None],
         on_save_opportunity: Callable[[dict], None],
+        on_delete_item: Callable[[], None],
         on_mark_dirty: Callable[..., None],
         parent: QWidget | None = None,
     ) -> None:
@@ -33,16 +26,15 @@ class OpportunitiesTab(ScoredEntitiesTab):
             on_item_clicked=on_opportunity_clicked,
             on_new_item=on_new_opportunity,
             on_save_item=on_save_opportunity,
+            on_delete_item=on_delete_item,
             on_mark_dirty=on_mark_dirty,
             on_fit_table_card=None,
             parent=parent,
         )
 
-        # Back-compat attribute names used by LayoutMixin and mixins.
-        self.opps_table = self.table
-        self.opp_form = self.form
-        self.new_opp_btn = self.new_btn
-        self.opp_editor_label = self.editor_label
+        # Explicitly map the cards so layout_mixin can find them!
+        self.table_card = self.ui.table_card
+        self.editor_card = self.ui.editor_card
 
         # Back-compat filter widget names for the OpportunitiesMixin.
         self.opp_filter_search = self.filter_search

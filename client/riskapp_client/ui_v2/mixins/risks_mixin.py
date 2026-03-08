@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt  # pylint: disable=no-name-in-module
 # - Client-side filtering lives in services/entity_filters.
 from riskapp_client.adapters.local_storage import csv_data_exporter as export_csv
 from riskapp_client.services import entity_filters as filters
-from riskapp_client.ui.mixins.scored_entity_mixin import ScoredEntityMixin
+from riskapp_client.ui_v2.mixins.scored_entity_mixin import ScoredEntityMixin
 
 
 class RisksMixin(ScoredEntityMixin):

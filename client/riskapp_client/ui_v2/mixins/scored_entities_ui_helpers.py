@@ -10,6 +10,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Protocol
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLineEdit,
     QSpinBox,
@@ -90,11 +91,16 @@ def populate_scored_table(
             (str(it.score), False, True),
         ]
         for col, (val, use_id, center) in enumerate(cols):
-            table.setItem(
-                row,
-                col,
-                mk_item(val, entity_id=it.id if use_id else None, align_center=center),
-            )
+            # Pass align_center to mk_item (which your backend mixin handles)
+            item = mk_item(val, entity_id=it.id if use_id else None, align_center=center)
+            
+            # Strictly force alignment on the Qt item itself
+            if center:
+                item.setTextAlignment(Qt.AlignCenter)
+            else:
+                item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                
+            table.setItem(row, col, item)
 
     return {x.id: x for x in items}
 

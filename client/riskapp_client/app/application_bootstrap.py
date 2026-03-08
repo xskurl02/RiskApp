@@ -18,8 +18,8 @@ from riskapp_client.adapters.local_storage.sqlite_data_store import LocalStore
 from riskapp_client.adapters.remote_api.rest_api_client import ApiBackend
 from riskapp_client.app.environment_config import AppConfig
 from riskapp_client.services.offline_first_facade import OfflineFirstBackend
-from riskapp_client.ui.components.custom_gui_widgets import LoginDialog
-from riskapp_client.ui.main_application_window import MainWindow
+from riskapp_client.ui_v2.components.custom_gui_widgets import LoginDialog
+from riskapp_client.ui_v2.main_application_window import MainWindow
 from riskapp_client.utils.url_validation_helpers import UrlPolicy
 
 logger = logging.getLogger(__name__)
