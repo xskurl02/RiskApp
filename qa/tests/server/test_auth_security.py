@@ -1,3 +1,5 @@
+"""Test module for test auth security."""
+
 from __future__ import annotations
 
 import importlib
@@ -7,6 +9,7 @@ from fastapi.testclient import TestClient
 
 
 def _create_isolated_app(db_url: str):
+    """Internal helper for create isolated app."""
     os.environ["DATABASE_URL"] = db_url
     os.environ["AUTO_CREATE_SCHEMA"] = "1"
 
@@ -45,6 +48,7 @@ def _create_isolated_app(db_url: str):
 
 
 def test_password_policy_rejects_weak_password(tmp_path) -> None:
+    """Test that password policy rejects weak password."""
     db_file = tmp_path / "auth_policy.db"
     app = _create_isolated_app(f"sqlite+pysqlite:///{db_file}")
     with TestClient(app) as c:
@@ -56,6 +60,7 @@ def test_password_policy_rejects_weak_password(tmp_path) -> None:
 
 
 def test_login_rate_limit_kicks_in(tmp_path) -> None:
+    """Test that login rate limit kicks in."""
     db_file = tmp_path / "auth_rate.db"
     app = _create_isolated_app(f"sqlite+pysqlite:///{db_file}")
     with TestClient(app) as c:

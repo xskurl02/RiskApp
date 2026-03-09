@@ -17,21 +17,25 @@ from riskapp_client.domain.scored_entity_fields import SCORED_ENTITY_META_SQLITE
 
 
 def _exec(conn: sqlite3.Connection, sql: str) -> None:
+    """Internal helper for exec."""
     conn.execute(sql)
 
 
 def _exec_many(conn: sqlite3.Connection, ddls: Iterable[str]) -> None:
+    """Internal helper for exec many."""
     for ddl in ddls:
         _exec(conn, ddl)
 
 
 def _existing_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     # PRAGMA table_info returns rows: (cid, name, type, notnull, dflt_value, pk)
+    """Internal helper for existing columns."""
     rows = conn.execute(f"PRAGMA table_info({table});").fetchall()
     return {str(r[1]) for r in rows}
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    """Internal helper for table exists."""
     row = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table,)
     ).fetchone()
@@ -39,6 +43,7 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
 
 
 def _has_fk_to_table(conn: sqlite3.Connection, table: str, *, ref_table: str) -> bool:
+    """Internal helper for has fk to table."""
     try:
         rows = conn.execute(f"PRAGMA foreign_key_list({table});").fetchall()
     except sqlite3.Error:
@@ -61,12 +66,11 @@ def _migrate_assessments_table(conn: sqlite3.Connection) -> None:
     - introduces `opportunity_id` (nullable),
     - keeps `risk_id` for backward compatibility (nullable).
     """
-
     # Disable FK checks during table rebuild.
     conn.execute("PRAGMA foreign_keys=OFF;")
     conn.execute("ALTER TABLE assessments RENAME TO assessments_old;")
-
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS assessments (
             id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL,
@@ -85,8 +89,8 @@ def _migrate_assessments_table(conn: sqlite3.Connection) -> None:
             dirty INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY(project_id) REFERENCES projects(id)
         );
-        """)
-
+        """
+    )
     old_cols = _existing_columns(conn, "assessments_old")
     select_cols = [
         c
@@ -108,7 +112,6 @@ def _migrate_assessments_table(conn: sqlite3.Connection) -> None:
         )
         if c in old_cols
     ]
-
     if select_cols:
         rows = conn.execute(
             f"SELECT {', '.join(select_cols)} FROM assessments_old;"
@@ -121,7 +124,6 @@ def _migrate_assessments_table(conn: sqlite3.Connection) -> None:
 
         sqlite3.Row is indexable by column name but doesn't implement .get.
         """
-
         try:
             return row[key]
         except Exception:
@@ -132,15 +134,12 @@ def _migrate_assessments_table(conn: sqlite3.Connection) -> None:
         item_id = str((r["item_id"] if "item_id" in old_cols else "") or "")
         if not item_id:
             item_id = str((r["risk_id"] if "risk_id" in old_cols else "") or "")
-
         item_type = str(
             (r["item_type"] if "item_type" in old_cols else "risk") or "risk"
         )
         item_type = item_type.strip().lower() or "risk"
-
         risk_id = item_id if item_type == "risk" else None
         opp_id = item_id if item_type == "opportunity" else None
-
         conn.execute(
             """
             INSERT INTO assessments (
@@ -167,7 +166,6 @@ def _migrate_assessments_table(conn: sqlite3.Connection) -> None:
                 int(_row_get(r, "dirty", 0) or 0),
             ),
         )
-
     conn.execute("DROP TABLE assessments_old;")
     conn.execute("PRAGMA foreign_keys=ON;")
 
@@ -181,7 +179,6 @@ def ensure_columns(
     - SQLite supports adding columns via ALTER TABLE ... ADD COLUMN.
     - This is safe to run repeatedly.
     """
-
     existing = _existing_columns(conn, table)
     for name, col_type in columns:
         if name in existing:
@@ -191,20 +188,14 @@ def ensure_columns(
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create/upgrade schema for the local offline-first store."""
-
     cur = conn.cursor()
     cur.execute("PRAGMA journal_mode=WAL;")
     cur.execute("PRAGMA synchronous=NORMAL;")
     cur.execute("PRAGMA foreign_keys=ON;")
-
-    # ---- Legacy schema fixups ----
-    # Some older versions incorrectly enforced assessments.risk_id -> risks.id.
-    # That makes opportunity assessments impossible when foreign_keys=ON.
     if _table_exists(conn, "assessments") and _has_fk_to_table(
         conn, "assessments", ref_table="risks"
     ):
         _migrate_assessments_table(conn)
-
     _exec_many(
         conn,
         [
@@ -311,14 +302,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             """,
         ],
     )
-
-    # ---- Schema upgrades (idempotent, based on introspection) ----
-
-    # Scored-entity assignment/meta fields
     ensure_columns(conn, "risks", SCORED_ENTITY_META_SQLITE_COLUMNS)
     ensure_columns(conn, "opportunities", SCORED_ENTITY_META_SQLITE_COLUMNS)
-
-    # Assessment columns (older DBs may not have them)
     ensure_columns(
         conn,
         "assessments",
@@ -329,9 +314,6 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             ("opportunity_id", "TEXT"),
         ],
     )
-
-    # ---- Indexes ----
-
     _exec_many(
         conn,
         [
@@ -344,11 +326,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             "CREATE INDEX IF NOT EXISTS assessments_risk_idx ON assessments(project_id, risk_id, is_deleted);",
             "CREATE INDEX IF NOT EXISTS assessments_opp_idx ON assessments(project_id, opportunity_id, is_deleted);",
             "CREATE INDEX IF NOT EXISTS assessments_user_idx ON assessments(project_id, assessor_user_id);",
-            # Code should be unique within a project (NULLs allowed).
-            # Create after columns exist.
             "CREATE UNIQUE INDEX IF NOT EXISTS risks_project_code_uq ON risks(project_id, code);",
             "CREATE UNIQUE INDEX IF NOT EXISTS opps_project_code_uq ON opportunities(project_id, code);",
         ],
     )
-
     conn.commit()

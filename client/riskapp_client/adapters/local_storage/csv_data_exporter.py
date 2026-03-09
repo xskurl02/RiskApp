@@ -14,6 +14,7 @@ from riskapp_client.domain.domain_models import Opportunity, Risk
 from riskapp_client.domain.scored_entity_fields import SCORED_ENTITY_CSV_COLUMNS
 
 _DANGEROUS_PREFIXES = ("=", "+", "-", "@")
+_NUMERIC_COLS = {"probability", "impact", "score"}
 
 
 def _sanitize_csv_cell(value: str) -> str:
@@ -36,11 +37,10 @@ def _cell(value: object) -> str:
 
 @dataclass(frozen=True)
 class CsvExportResult:
+    """Represent Csv Export Result."""
+
     path: Path
     rows_written: int
-
-
-_NUMERIC_COLS = {"probability", "impact", "score"}
 
 
 def _export_scored_entities(
@@ -49,11 +49,9 @@ def _export_scored_entities(
     """Export Risk/Opportunity rows to CSV using the shared column list."""
     out_path = Path(path)
     items = list(rows)
-
     with out_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(list(SCORED_ENTITY_CSV_COLUMNS))
-
         for ent in items:
             out_row = []
             for col in SCORED_ENTITY_CSV_COLUMNS:
@@ -63,7 +61,6 @@ def _export_scored_entities(
                 else:
                     out_row.append(_cell(v))
             writer.writerow(out_row)
-
     return CsvExportResult(path=out_path, rows_written=len(items))
 
 

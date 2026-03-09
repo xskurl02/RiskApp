@@ -15,7 +15,10 @@ from collections import deque
 
 
 class InMemorySlidingWindowLimiter:
+    """Represent In Memory Sliding Window Limiter."""
+
     def __init__(self, *, limit: int, window_s: int) -> None:
+        """Internal helper for init."""
         self.limit = int(limit)
         self.window_s = int(window_s)
         self._lock = threading.Lock()

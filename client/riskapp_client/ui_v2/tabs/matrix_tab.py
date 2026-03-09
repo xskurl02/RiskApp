@@ -26,11 +26,11 @@ class MatrixTab(QWidget):
         super().__init__(parent)
         self.ui = Ui_MatrixTab()
         self.ui.setupUi(self)
-
         if on_kind_changed:
             self.ui.kind_combo.currentTextChanged.connect(on_kind_changed)
 
         def style_matrix(table: QTableWidget) -> None:
+            """Handle style matrix."""
             setup_readonly_table(table)
             table.setFrameShape(QFrame.Box)
             table.setFrameShadow(QFrame.Plain)
@@ -54,23 +54,24 @@ class MatrixTab(QWidget):
 
         style_matrix(self.ui.risks_matrix_table)
         style_matrix(self.ui.opps_matrix_table)
-
         self.kind_combo = self.ui.kind_combo
         self.risks_label = self.ui.risks_label
         self.risks_matrix_table = self.ui.risks_matrix_table
         self.opps_label = self.ui.opps_label
         self.opps_matrix_table = self.ui.opps_matrix_table
-
         self.set_kind(self.kind_combo.currentText())
-    
-        # --- CONTEXT HELP (TOOLTIPS) ---
-        self.kind_combo.setToolTip("Select which matrices to display: Risks, Opportunities, or Both")
-        
-        self.risks_matrix_table.setToolTip("Risk Matrix: Displays the count of risks mapped by Probability (rows) and Impact (columns)")
-        self.opps_matrix_table.setToolTip("Opportunity Matrix: Displays the count of opportunities mapped by Probability (rows) and Impact (columns)")
-        # -------------------------------
+        self.kind_combo.setToolTip(
+            "Select which matrices to display: Risks, Opportunities, or Both"
+        )
+        self.risks_matrix_table.setToolTip(
+            "Risk Matrix: Displays the count of risks mapped by Probability (rows) and Impact (columns)"
+        )
+        self.opps_matrix_table.setToolTip(
+            "Opportunity Matrix: Displays the count of opportunities mapped by Probability (rows) and Impact (columns)"
+        )
 
     def set_kind(self, text: str) -> None:
+        """Set kind."""
         kind = (text or "Risks").strip().lower()
         if kind == "opportunities":
             self.risks_label.hide()

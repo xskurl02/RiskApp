@@ -13,9 +13,7 @@ from riskapp_client.utils.logging_configuration import configure_logging
 
 def main() -> int:
     """Run the Qt event loop."""
-
     configure_logging()
-
     app = QApplication(sys.argv)
     window = build_main_window(AppConfig.from_env())
     window.show()

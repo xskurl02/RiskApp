@@ -1,3 +1,5 @@
+"""API router for actions."""
+
 from __future__ import annotations
 
 import uuid
@@ -30,6 +32,7 @@ def _resolve_target(
     risk_id: uuid.UUID | None,
     opportunity_id: uuid.UUID | None,
 ) -> tuple[uuid.UUID, str]:
+    """Internal helper for resolve target."""
     if bool(risk_id) == bool(opportunity_id):
         raise HTTPException(
             status_code=400,
@@ -56,6 +59,7 @@ def _resolve_target(
 
 
 def _action_out(action: Action, *, target_type: str) -> dict:
+    """Internal helper for action out."""
     return ActionOut(
         id=action.id,
         project_id=action.project_id,
@@ -81,6 +85,7 @@ def create_action(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
+    """Create action."""
     require_min_role(db, project_id, user.id, min_role=Role.member)
 
     item_id, target_type = _resolve_target(
@@ -124,6 +129,7 @@ def list_actions(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
+    """Return actions."""
     ensure_member(db, project_id, user.id)
     rows = db.execute(
         select(Action, Item.type)
@@ -142,6 +148,7 @@ def update_action(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
+    """Update action."""
     require_min_role(db, project_id, user.id, min_role=Role.member)
 
     action = (
@@ -211,6 +218,7 @@ def delete_action(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
+    """Delete action."""
     require_min_role(db, project_id, user.id, min_role=Role.manager)
     delete_item(db, project_id, action_id, Action)
     return Response(status_code=204)

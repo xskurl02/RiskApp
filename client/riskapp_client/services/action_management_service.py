@@ -14,13 +14,16 @@ class ActionService:
     """Create/update actions locally and queue sync."""
 
     def __init__(self, store: LocalStore, outbox: OutboxStore) -> None:
+        """Internal helper for init."""
         self._store = store
         self._outbox = outbox
 
     def list(self, project_id: str) -> list[Action]:
+        """Return item."""
         return self._store.list_actions(project_id)
 
     def create(self, project_id: str, **kwargs: Any) -> Action:
+        """Create item."""
         return self._upsert(
             action_id=str(uuid.uuid4()),
             project_id=project_id,
@@ -29,6 +32,7 @@ class ActionService:
         )
 
     def update(self, action_id: str, **kwargs: Any) -> Action:
+        """Update item."""
         project_id, version = self._store.get_action_project_and_version(action_id)
         return self._upsert(
             action_id=action_id,
@@ -52,6 +56,7 @@ class ActionService:
         owner_user_id: str | None,
     ) -> Action:
         # Keep the schema strict: an action can target either a risk or an opportunity.
+        """Internal helper for upsert."""
         risk_id = target_id if target_type == "risk" else None
         opportunity_id = target_id if target_type == "opportunity" else None
         desc = description or ""

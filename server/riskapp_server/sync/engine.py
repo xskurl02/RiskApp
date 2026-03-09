@@ -98,8 +98,6 @@ def parse_uuid(value: Any, field: str) -> uuid.UUID:
         ) from exc
 
 
-
-
 def model_to_dict(obj: Any) -> dict[str, Any]:
     """Serialize SQLAlchemy models to plain JSON-safe primitives.
 
@@ -223,26 +221,37 @@ def pull_since(
     risks, more_risks, cur_risks = item_page("risk", "risks")
     opportunities, more_opps, cur_opps = item_page("opportunity", "opportunities")
 
-    # Actions
-    ats, alast = _parse_cursor(cursors.get("actions"), default_since=since)
-    abase = _encode_cursor(ats, alast)
-    aq = (
-        select(Action, Item.type)
-        .join(Item, Item.id == Action.item_id)
-        .where(
-            Action.project_id == project_id,
-            or_(
-                Action.updated_at > ats,
-                (Action.updated_at == ats) & (Action.id > alast),
-            ),
+    def _paginate_joined(
+        Model: Any, cursor_key: str, project_filter: Any
+    ) -> tuple[list, bool, str]:
+        """Shared cursor-pagination logic for models joined against Item."""
+        ts, last_id = _parse_cursor(cursors.get(cursor_key), default_since=since)
+        base_cur = _encode_cursor(ts, last_id)
+        q = (
+            select(Model, Item.type)
+            .join(Item, Model.item_id == Item.id)
+            .where(
+                project_filter,
+                or_(
+                    Model.updated_at > ts,
+                    (Model.updated_at == ts) & (Model.id > last_id),
+                ),
+            )
+            .order_by(Model.updated_at.asc(), Model.id.asc())
         )
-        .order_by(Action.updated_at.asc(), Action.id.asc())
-    )
-    action_rows = db.execute(aq.limit(lim + 1) if lim else aq).all()
-    more_actions = bool(lim and len(action_rows) > lim)
-    if more_actions:
-        action_rows = action_rows[:lim]
+        rows = db.execute(q.limit(lim + 1) if lim else q).all()
+        more = bool(lim and len(rows) > lim)
+        if more:
+            rows = rows[:lim]
+        next_cur = (
+            _encode_cursor(rows[-1][0].updated_at, rows[-1][0].id) if rows else base_cur
+        )
+        return rows, more, next_cur
 
+    # Actions
+    action_rows, more_actions, cur_actions = _paginate_joined(
+        Action, "actions", Action.project_id == project_id
+    )
     actions_out = [
         ActionOut(
             id=a.id,
@@ -261,37 +270,9 @@ def pull_since(
         for a, t in action_rows
     ]
 
-    cur_actions = (
-        _encode_cursor(action_rows[-1][0].updated_at, action_rows[-1][0].id)
-        if action_rows
-        else abase
-    )
-
     # Assessments (risk + opportunity)
-    sts, slast = _parse_cursor(cursors.get("assessments"), default_since=since)
-    sbase = _encode_cursor(sts, slast)
-    sq = (
-        select(Assessment, Item.type)
-        .join(Item, Assessment.item_id == Item.id)
-        .where(
-            Item.project_id == project_id,
-            or_(
-                Assessment.updated_at > sts,
-                (Assessment.updated_at == sts) & (Assessment.id > slast),
-            ),
-        )
-        .order_by(Assessment.updated_at.asc(), Assessment.id.asc())
-    )
-
-    assessment_rows = db.execute(sq.limit(lim + 1) if lim else sq).all()
-    more_assessments = bool(lim and len(assessment_rows) > lim)
-    if more_assessments:
-        assessment_rows = assessment_rows[:lim]
-
-    cur_assessments = (
-        _encode_cursor(assessment_rows[-1][0].updated_at, assessment_rows[-1][0].id)
-        if assessment_rows
-        else sbase
+    assessment_rows, more_assessments, cur_assessments = _paginate_joined(
+        Assessment, "assessments", Item.project_id == project_id
     )
 
     has_more = {
@@ -342,6 +323,8 @@ def pull_since(
 
 
 class ConflictError(Exception):
+    """Represent Conflict Error."""
+
     def __init__(
         self, reason: str, entity_id: uuid.UUID | None, server_version: int | None
     ) -> None:
@@ -411,7 +394,7 @@ def push_changes(
             continue
 
         # Treat 'deleted' as a privileged soft-delete even if expressed via an upsert.
-        # This keeps offline-first clients from accidentally bypassing manager-only deletes.
+        # This keeps offline-first clients from bypassing manager-only deletes.
         if entity in {"risk", "opportunity"} and op == "upsert":
             st = str((record or {}).get("status") or "").lower().strip()
             if st == RiskStatus.deleted.value or bool((record or {}).get("is_deleted")):
@@ -598,25 +581,18 @@ def _parse_record(entity: str, record: dict) -> dict:
     try:
         Schema = ENTITY_REGISTRY[entity]["schema"]
         val = Schema(**record).model_dump(exclude_unset=True)
-        if entity == "action":
+
+        if entity in {"action", "assessment"}:
             rid, oid = val.pop("risk_id", None), val.pop("opportunity_id", None)
-            if not val.get("item_id"):
-                if bool(rid) == bool(oid):
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Action must have exactly one of risk_id/opportunity_id",
-                    )
-                val["item_id"], val["_target_type"] = (
-                    rid or oid,
-                    "risk" if rid else "opportunity",
+            if entity == "action" and not val.get("item_id") and bool(rid) == bool(oid):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Action must have exactly one of risk_id/opportunity_id",
                 )
-        elif entity == "assessment":
-            rid = val.pop("risk_id", None)
-            oid = val.pop("opportunity_id", None)
             if not val.get("item_id"):
                 val["item_id"] = rid or oid
             # If the client supplies an explicit target field, enforce type.
-            # If not, allow either risk/opportunity (item_id is validated to exist in the project).
+            # If not, allow either risk/opportunity (item_id is validated to exist).
             val["_target_type"] = "risk" if rid else ("opportunity" if oid else None)
         # Normalize "status=deleted" into a soft-delete flag for scored entities.
         if entity in {"risk", "opportunity"}:
@@ -628,6 +604,39 @@ def _parse_record(entity: str, record: dict) -> dict:
         return val
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Validation error: {exc}") from exc
+
+
+def _validate_relationships(
+    db: Session, project_id: uuid.UUID, entity: str, val: dict, obj: Any = None
+) -> None:
+    """Shared validation for cross-project parent/child relationships."""
+    config = ENTITY_REGISTRY[entity]
+    if "parent_model" in config:
+        parent_field = config["parent_field"]
+        target_parent = (
+            val.get(parent_field)
+            if obj is None
+            else (val.get(parent_field) or getattr(obj, parent_field))
+        )
+
+        if not target_parent and obj is None:
+            raise HTTPException(status_code=400, detail=f"{parent_field} is required")
+
+        if target_parent:
+            _ensure_item_in_project(
+                db,
+                project_id,
+                parse_uuid(target_parent, parent_field),
+                expected_type=val.get("_target_type"),
+            )
+
+    if entity == "action" and val.get("item_id"):
+        _ensure_item_in_project(
+            db,
+            project_id,
+            parse_uuid(val["item_id"], "item_id"),
+            expected_type=val.get("_target_type"),
+        )
 
 
 def _ensure_item_in_project(
@@ -687,6 +696,21 @@ def _check_base_version(obj: Any, base_version: Any, entity_id: uuid.UUID) -> No
         )
 
 
+def _validate_existing_obj(
+    obj: Any, entity: str, entity_id: uuid.UUID, user_id: uuid.UUID, base_version: Any
+) -> None:
+    """Shared validation/access control for both upserts and deletions."""
+    if entity in {"risk", "opportunity"} and getattr(obj, "type", None) != entity:
+        raise ConflictError("type_mismatch", entity_id, getattr(obj, "version", None))
+
+    if entity == "assessment" and getattr(obj, "assessor_user_id", None) != user_id:
+        raise HTTPException(
+            status_code=403, detail="Cannot modify another user's assessment"
+        )
+
+    _check_base_version(obj, base_version, entity_id)
+
+
 def _apply_upsert(
     db: Session,
     user_id: uuid.UUID,
@@ -698,13 +722,6 @@ def _apply_upsert(
 ) -> uuid.UUID:
     entity_id = parse_uuid(record.get("id"), "record.id")
     obj = _fetch_obj(db, entity, entity_id, project_id)
-
-    if (
-        obj is not None
-        and entity in {"risk", "opportunity"}
-        and getattr(obj, "type", None) != entity
-    ):
-        raise ConflictError("type_mismatch", entity_id, getattr(obj, "version", None))
 
     if obj is None:
         obj = _create_new(db, user_id, project_id, entity, entity_id, record)
@@ -721,12 +738,7 @@ def _apply_upsert(
         )
         return entity_id
 
-    if entity == "assessment" and getattr(obj, "assessor_user_id", None) != user_id:
-        raise HTTPException(
-            status_code=403, detail="Cannot modify another user's assessment"
-        )
-
-    _check_base_version(obj, base_version, entity_id)
+    _validate_existing_obj(obj, entity, entity_id, user_id, base_version)
     before = model_to_dict(obj)
     _update_existing(db, user_id, project_id, entity, obj, record)
     _audit(
@@ -757,15 +769,7 @@ def _apply_delete(
     if not obj:
         return entity_id
 
-    if entity == "assessment" and getattr(obj, "assessor_user_id", None) != user_id:
-        raise HTTPException(
-            status_code=403, detail="Cannot modify another user's assessment"
-        )
-
-    if entity in {"risk", "opportunity"} and getattr(obj, "type", None) != entity:
-        raise ConflictError("type_mismatch", entity_id, getattr(obj, "version", None))
-
-    _check_base_version(obj, base_version, entity_id)
+    _validate_existing_obj(obj, entity, entity_id, user_id, base_version)
     before = model_to_dict(obj)
     obj.soft_delete(utcnow())
     _audit(
@@ -803,26 +807,11 @@ def _create_new(
     # Apply per-entity defaults early; explicit record values override below.
     common |= defaults
 
+    _validate_relationships(db, project_id, entity, val)
+
     if "parent_model" in config:
-        parent_field = config["parent_field"]
-        if not val.get(parent_field):
-            raise HTTPException(status_code=400, detail=f"{parent_field} is required")
-        _ensure_item_in_project(
-            db,
-            project_id,
-            parse_uuid(val[parent_field], parent_field),
-            expected_type=val.get("_target_type"),
-        )
         # Assessments are owned by the assessor user.
         common |= {"assessor_user_id": user_id}
-
-    if entity == "action" and val.get("item_id"):
-        _ensure_item_in_project(
-            db,
-            project_id,
-            parse_uuid(val["item_id"], "item_id"),
-            expected_type=val.get("_target_type"),
-        )
 
     obj = Model(**common)
 
@@ -845,27 +834,7 @@ def _update_existing(
 ) -> None:
     now = utcnow()
     val = _parse_record(entity, record)
-    config = ENTITY_REGISTRY[entity]
-
-    if "parent_model" in config:
-        parent_field = config["parent_field"]
-        # Validate the (possibly updated) parent reference to prevent cross-project
-        # reassociation (important for assessments).
-        target_parent = val.get(parent_field) or getattr(obj, parent_field)
-        _ensure_item_in_project(
-            db,
-            project_id,
-            parse_uuid(target_parent, parent_field),
-            expected_type=val.get("_target_type"),
-        )
-
-    if entity == "action" and val.get("item_id"):
-        _ensure_item_in_project(
-            db,
-            project_id,
-            parse_uuid(val["item_id"], "item_id"),
-            expected_type=val.get("_target_type"),
-        )
+    _validate_relationships(db, project_id, entity, val, obj)
 
     for k, v in val.items():
         if hasattr(obj, k) and k not in {"score", "assessor_user_id"}:

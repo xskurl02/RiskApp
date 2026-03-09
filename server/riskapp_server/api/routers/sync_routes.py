@@ -1,3 +1,5 @@
+"""API router for sync routes."""
+
 from __future__ import annotations
 
 import uuid
@@ -31,6 +33,7 @@ def sync_pull(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
+    """Synchronize pull."""
     ensure_member(db, project_id, user.id)
     if payload.project_id != project_id:
         raise HTTPException(status_code=400, detail="project_id mismatch")
@@ -50,6 +53,7 @@ def sync_push(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
+    """Synchronize push."""
     require_min_role(db, project_id, user.id, min_role=Role.member)
     if payload.project_id != project_id:
         raise HTTPException(status_code=400, detail="project_id mismatch")

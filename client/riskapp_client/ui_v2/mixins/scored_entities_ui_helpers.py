@@ -21,6 +21,8 @@ from riskapp_client.services import entity_filters as filters
 
 
 class _ScoredEntity(Protocol):
+    """Represent Scored Entity."""
+
     id: str
     code: str | None
     title: str
@@ -53,6 +55,7 @@ MkItem = Callable[[str], QTableWidgetItem]
 
 
 def score_bounds(min_spin: QSpinBox, max_spin: QSpinBox) -> tuple[int, int]:
+    """Calculate bounds."""
     mn = int(min_spin.value())
     mx = int(max_spin.value())
     return (mx, mn) if mn > mx else (mn, mx)
@@ -61,6 +64,7 @@ def score_bounds(min_spin: QSpinBox, max_spin: QSpinBox) -> tuple[int, int]:
 def date_bounds(
     from_edit: QLineEdit, to_edit: QLineEdit
 ) -> tuple[datetime | None, datetime | None]:
+    """Handle date bounds."""
     dt_from = filters.parse_date(from_edit.text())
     dt_to = filters.parse_date(to_edit.text())
     if dt_to:
@@ -92,16 +96,15 @@ def populate_scored_table(
         ]
         for col, (val, use_id, center) in enumerate(cols):
             # Pass align_center to mk_item (which your backend mixin handles)
-            item = mk_item(val, entity_id=it.id if use_id else None, align_center=center)
-            
+            item = mk_item(
+                val, entity_id=it.id if use_id else None, align_center=center
+            )
             # Strictly force alignment on the Qt item itself
             if center:
                 item.setTextAlignment(Qt.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-                
             table.setItem(row, col, item)
-
     return {x.id: x for x in items}
 
 

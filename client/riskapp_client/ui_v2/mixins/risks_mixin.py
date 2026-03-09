@@ -5,9 +5,6 @@ Filtering, table rendering, editor behavior, column sizing, and CSV export for r
 
 from __future__ import annotations
 
-# NOTE:
-# - CSV export lives under adapters/local_storage.
-# - Client-side filtering lives in services/entity_filters.
 from riskapp_client.adapters.local_storage import csv_data_exporter as export_csv
 from riskapp_client.services import entity_filters as filters
 from riskapp_client.ui_v2.mixins.scored_entity_mixin import ScoredEntityMixin
@@ -47,8 +44,6 @@ class RisksMixin(ScoredEntityMixin):
         )
         if res is not None:
             self._risk_cache = res
-        #        # Column sizing / per-project caching and final card fit
-        #        self._ensure_risks_column_widths(pid)
         self.risks_table.resizeColumnsToContents()
         self._fit_table_card()
 
@@ -67,11 +62,8 @@ class RisksMixin(ScoredEntityMixin):
         )
         if new_id:
             self.current_risk_id = new_id
-            self.risks_tab.delete_btn.setVisible(True)  # <--- Show button
             self._editor_dirty = False
-            self.current_assessment_item_type = "risk"
-            self.current_assessment_item_id = new_id
-            self._refresh_assessments()
+            self._sync_assessment_state("risk", new_id, self.risks_tab)
 
     def _fit_table_card(self, max_height: int = 260) -> None:
         pass
@@ -98,18 +90,13 @@ class RisksMixin(ScoredEntityMixin):
 
     def _start_new_risk(self) -> None:
         self._commit_editor_changes(refresh=True)
-
         self.current_risk_id = None
-        self.risks_tab.delete_btn.setVisible(False)  # <--- Hide button
-        self.current_assessment_item_id = None
-        self.current_assessment_item_type = "risk"
         self.editor_label.setText("Editor (new risk)")
         self.risk_form.set_values(title="", probability=3, impact=3)
         self._editor_dirty = False
-
         self.risks_table.clearSelection()
         self.risks_table.setCurrentItem(None)
-        self._refresh_assessments()
+        self._sync_assessment_state("risk", None, self.risks_tab)
 
     def _save_risk(self, payload: dict) -> None:
         extra = [
@@ -131,9 +118,7 @@ class RisksMixin(ScoredEntityMixin):
         if saved_id:
             self.current_risk_id = saved_id
             self._editor_dirty = False
-            self.current_assessment_item_type = "risk"
-            self.current_assessment_item_id = saved_id
-            self._refresh_assessments()
+            self._sync_assessment_state("risk", saved_id, self.risks_tab)
 
     def _delete_risk(self) -> None:
         def refresh_all():

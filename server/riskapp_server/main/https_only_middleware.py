@@ -1,3 +1,5 @@
+"""Server module for https only middleware."""
+
 from __future__ import annotations
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -16,6 +18,7 @@ class HttpsOnlyMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request, call_next):
+        """Handle dispatch."""
         if not ENFORCE_HTTPS:
             return await call_next(request)
 

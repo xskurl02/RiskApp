@@ -1,7 +1,10 @@
+"""Test module for test outbox queue."""
+
 from __future__ import annotations
 
 
 def test_outbox_squashes_multiple_changes_for_same_entity_id(tmp_path) -> None:
+    """Test that outbox squashes multiple changes for same entity id."""
     from riskapp_client.adapters.local_storage.sqlite_data_store import LocalStore
     from riskapp_client.adapters.local_storage.sync_outbox_queue import OutboxStore
 
@@ -52,6 +55,7 @@ def test_outbox_squashes_multiple_changes_for_same_entity_id(tmp_path) -> None:
 def test_requeue_conflict_creates_new_change_id_and_updates_base_version(
     tmp_path,
 ) -> None:
+    """Test that requeue conflict creates new change id and updates base version."""
     from riskapp_client.adapters.local_storage.sqlite_data_store import LocalStore
     from riskapp_client.adapters.local_storage.sync_outbox_queue import OutboxStore
 
@@ -87,5 +91,52 @@ def test_requeue_conflict_creates_new_change_id_and_updates_base_version(
         assert len(changes) == 1
         assert changes[0]["change_id"] == new_id
         assert changes[0]["base_version"] == 7
+    finally:
+        store.close()
+
+
+def test_get_blocked_changes_exposes_conflict_reason_and_title(tmp_path) -> None:
+    """Test that get blocked changes exposes conflict reason and title."""
+    from riskapp_client.adapters.local_storage.sqlite_data_store import LocalStore
+    from riskapp_client.adapters.local_storage.sync_outbox_queue import OutboxStore
+
+    db_file = tmp_path / "client_outbox_blocked.db"
+    store = LocalStore(str(db_file))
+    try:
+        store.conn.execute(
+            "INSERT INTO projects (id, name, description) VALUES (?,?,?);",
+            ("p1", "P", ""),
+        )
+        store.upsert_local_risk(
+            risk_id="r1",
+            project_id="p1",
+            title="Server race",
+            probability=2,
+            impact=2,
+            version=1,
+            dirty=1,
+        )
+
+        outbox = OutboxStore(store)
+        outbox.queue_risk_upsert(
+            "p1", {"id": "r1", "title": "Server race", "probability": 2, "impact": 2}
+        )
+        pending = outbox.get_pending_changes("p1")
+        change_id = pending[0]["change_id"]
+
+        outbox.block_outbox_id(
+            change_id,
+            (
+                f'{{"change_id": "{change_id}", "reason": "Server version changed", '
+                '"server_version": 9}'
+            ),
+        )
+
+        blocked = outbox.get_blocked_changes("p1")
+        assert len(blocked) == 1
+        assert blocked[0]["entity"] == "risk"
+        assert blocked[0]["title"] == "Server race"
+        assert blocked[0]["reason"] == "Server version changed"
+        assert blocked[0]["server_version"] == 9
     finally:
         store.close()

@@ -1,3 +1,5 @@
+"""Server module for items crud."""
+
 from __future__ import annotations
 
 import uuid
@@ -24,16 +26,25 @@ def create_item(db: Session, user_id: uuid.UUID, project_id: uuid.UUID, payload,
     if not code:
         code = f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
 
-    status = str(
-        getattr(getattr(payload, "status", None), "value", getattr(payload, "status", None))
-        or RiskStatus.concept.value
-    ).lower().strip()
+    status = (
+        str(
+            getattr(
+                getattr(payload, "status", None),
+                "value",
+                getattr(payload, "status", None),
+            )
+            or RiskStatus.concept.value
+        )
+        .lower()
+        .strip()
+    )
     if status == RiskStatus.deleted.value:
-        # Deletion is an explicit manager action; don't allow creating a pre-deleted item.
-        raise HTTPException(status_code=422, detail="Cannot create an item with status=deleted")
-    occurred_at = (
-        payload.occurred_at
-        or (now if status == RiskStatus.happened.value else None)
+        # Deletion is an  manager action, don't allow creating a pre-deleted item.
+        raise HTTPException(
+            status_code=422, detail="Cannot create an item with status=deleted"
+        )
+    occurred_at = payload.occurred_at or (
+        now if status == RiskStatus.happened.value else None
     )
 
     data = payload.model_dump(exclude_unset=True)
@@ -144,7 +155,6 @@ def update_item(
         db.refresh(item)
         return item
 
-
     recalculate_item_scores(item)
     item.updated_at = now
     item.version = int(item.version) + 1
@@ -213,6 +223,23 @@ def generate_report(
     item_type = filters.get("item_type")
     status = filters.get("status")
 
+    def _filtered_query(stmt):
+        """applies standard report filters to any base SELECT statement."""
+        return apply_item_filters(
+            stmt.where(Model.project_id == project_id),
+            Model,
+            search=filters.get("search"),
+            item_type=item_type,
+            min_score=filters.get("min_score"),
+            max_score=filters.get("max_score"),
+            status=status,
+            category=filters.get("category"),
+            owner_user_id=filters.get("owner_user_id"),
+            owner_unassigned=bool(filters.get("owner_unassigned")),
+            from_date=filters.get("from_date"),
+            to_date=filters.get("to_date"),
+        )
+
     # "project_total" is a lightweight "how many items exist" figure
     # for the given project+type, respecting only the status/deleted filter.
     project_total = int(
@@ -237,24 +264,13 @@ def generate_report(
 
     # Full filtered stats (no pagination).
     stats_row = db.execute(
-        apply_item_filters(
+        _filtered_query(
             select(
                 func.count(Model.id),
                 func.min(Model.score),
                 func.max(Model.score),
                 func.avg(Model.score),
-            ).where(Model.project_id == project_id),
-            Model,
-            search=filters.get("search"),
-            item_type=item_type,
-            min_score=filters.get("min_score"),
-            max_score=filters.get("max_score"),
-            status=status,
-            category=filters.get("category"),
-            owner_user_id=filters.get("owner_user_id"),
-            owner_unassigned=bool(filters.get("owner_unassigned")),
-            from_date=filters.get("from_date"),
-            to_date=filters.get("to_date"),
+            )
         )
     ).one()
 
@@ -267,64 +283,25 @@ def generate_report(
     status_counts = {
         str(st or RiskStatus.concept.value): int(cnt or 0)
         for st, cnt in db.execute(
-            apply_item_filters(
-                select(Model.status, func.count(Model.id)).where(
-                    Model.project_id == project_id
-                ),
-                Model,
-                search=filters.get("search"),
-                item_type=item_type,
-                min_score=filters.get("min_score"),
-                max_score=filters.get("max_score"),
-                status=status,
-                category=filters.get("category"),
-                owner_user_id=filters.get("owner_user_id"),
-                owner_unassigned=bool(filters.get("owner_unassigned")),
-                from_date=filters.get("from_date"),
-                to_date=filters.get("to_date"),
-            ).group_by(Model.status)
+            _filtered_query(select(Model.status, func.count(Model.id))).group_by(
+                Model.status
+            )
         ).all()
     }
 
     category_counts = {}
     for cat, cnt in db.execute(
-        apply_item_filters(
-            select(Model.category, func.count(Model.id)).where(
-                Model.project_id == project_id
-            ),
-            Model,
-            search=filters.get("search"),
-            item_type=item_type,
-            min_score=filters.get("min_score"),
-            max_score=filters.get("max_score"),
-            status=status,
-            category=filters.get("category"),
-            owner_user_id=filters.get("owner_user_id"),
-            owner_unassigned=bool(filters.get("owner_unassigned")),
-            from_date=filters.get("from_date"),
-            to_date=filters.get("to_date"),
-        ).group_by(Model.category)
+        _filtered_query(select(Model.category, func.count(Model.id))).group_by(
+            Model.category
+        )
     ).all():
         category_counts[cat or "(none)"] = int(cnt or 0)
 
     owner_counts = {}
     for owner_id, cnt in db.execute(
-        apply_item_filters(
-            select(Model.owner_user_id, func.count(Model.id)).where(
-                Model.project_id == project_id
-            ),
-            Model,
-            search=filters.get("search"),
-            item_type=item_type,
-            min_score=filters.get("min_score"),
-            max_score=filters.get("max_score"),
-            status=status,
-            category=filters.get("category"),
-            owner_user_id=filters.get("owner_user_id"),
-            owner_unassigned=bool(filters.get("owner_unassigned")),
-            from_date=filters.get("from_date"),
-            to_date=filters.get("to_date"),
-        ).group_by(Model.owner_user_id)
+        _filtered_query(select(Model.owner_user_id, func.count(Model.id))).group_by(
+            Model.owner_user_id
+        )
     ).all():
         owner_counts[str(owner_id) if owner_id else "(none)"] = int(cnt or 0)
 
@@ -337,20 +314,7 @@ def generate_report(
     )
     buckets = {"0-4": 0, "5-9": 0, "10-14": 0, "15-19": 0, "20-25": 0}
     for b, cnt in db.execute(
-        apply_item_filters(
-            select(bucket, func.count(Model.id)).where(Model.project_id == project_id),
-            Model,
-            search=filters.get("search"),
-            item_type=item_type,
-            min_score=filters.get("min_score"),
-            max_score=filters.get("max_score"),
-            status=status,
-            category=filters.get("category"),
-            owner_user_id=filters.get("owner_user_id"),
-            owner_unassigned=bool(filters.get("owner_unassigned")),
-            from_date=filters.get("from_date"),
-            to_date=filters.get("to_date"),
-        ).group_by(bucket)
+        _filtered_query(select(bucket, func.count(Model.id))).group_by(bucket)
     ).all():
         buckets[str(b)] = int(cnt or 0)
 

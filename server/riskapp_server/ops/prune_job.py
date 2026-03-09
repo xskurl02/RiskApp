@@ -31,6 +31,7 @@ from typing import Any
 
 
 def _env(name: str) -> str:
+    """Internal helper for env."""
     v = os.getenv(name, "").strip()
     if not v:
         raise SystemExit(f"Missing env var: {name}")
@@ -38,6 +39,7 @@ def _env(name: str) -> str:
 
 
 def _request_json(req: urllib.request.Request, timeout: int) -> dict[str, Any]:
+    """Internal helper for request json."""
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read().decode("utf-8", errors="replace")
@@ -54,6 +56,7 @@ def _request_json(req: urllib.request.Request, timeout: int) -> dict[str, Any]:
 
 
 def login(base_url: str, email: str, password: str) -> str:
+    """Handle login."""
     login_path = os.getenv("RISKAPP_LOGIN_PATH", "/login").strip() or "/login"
     login_mode = os.getenv("RISKAPP_LOGIN_MODE", "form").strip().lower() or "form"
 
@@ -83,6 +86,7 @@ def login(base_url: str, email: str, password: str) -> str:
 
 
 def prune(base_url: str, token: str, project_id: str, days: int) -> dict[str, Any]:
+    """Handle prune."""
     tpl = os.getenv(
         "RISKAPP_PRUNE_PATH", "/projects/{project_id}/maintenance/prune"
     ).strip()
@@ -106,6 +110,7 @@ def prune(base_url: str, token: str, project_id: str, days: int) -> dict[str, An
 
 
 def main(argv: list[str]) -> int:
+    """Handle main."""
     parser = argparse.ArgumentParser(
         prog="python -m riskapp_server.ops.prune_job",
         description="Call the admin-only retention prune endpoint.",

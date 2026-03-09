@@ -55,9 +55,11 @@ class ScoredEntityService:
     """Create/update scored entities locally and queue sync."""
 
     def __init__(self, wiring: ScoredEntityWiring) -> None:
+        """Internal helper for init."""
         self._w = wiring
 
     def list(self, project_id: str) -> list[ModelT]:
+        """Return item."""
         return self._w.list_fn(project_id)
 
     def create(
@@ -69,6 +71,7 @@ class ScoredEntityService:
         impact: int,
         meta: Mapping[str, Any],
     ) -> ModelT:
+        """Create item."""
         entity_id = str(uuid.uuid4())
         now = utc_iso()
 
@@ -108,6 +111,7 @@ class ScoredEntityService:
         impact: int,
         meta: Mapping[str, Any],
     ) -> ModelT:
+        """Update item."""
         project_id, version = self._w.get_project_and_version_fn(entity_id)
         now = utc_iso()
 
@@ -167,6 +171,7 @@ class ScoredEntityService:
         return self._w.model_cls(project_id=project_id, version=version, **record)
 
     def delete(self, entity_id: str) -> None:
+        """Delete item."""
         project_id, version = self._w.soft_delete_local_fn(entity_id)
 
         # Entity was never synced to the server. Remote net effect should be
@@ -179,6 +184,7 @@ class ScoredEntityService:
         self._w.queue_delete_fn(project_id, entity_id)
 
     def _ensure_code(self, project_id: str, code: Any, *, existing: Any) -> str | None:
+        """Internal helper for ensure code."""
         c = None
         if isinstance(code, str):
             c = code.strip() or None
@@ -203,6 +209,7 @@ class ScoredEntityService:
         record: Mapping[str, Any],
         version: int,
     ) -> None:
+        """Internal helper for upsert local."""
         kwargs: MutableMapping[str, Any] = {
             self._w.id_kw: entity_id,
             "project_id": project_id,

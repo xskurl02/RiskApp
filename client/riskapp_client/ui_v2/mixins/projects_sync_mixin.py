@@ -17,13 +17,32 @@ from PySide6.QtWidgets import (  # pylint: disable=no-name-in-module
 class ProjectsSyncMixin:
     """MainWindow mixin: ProjectsSyncMixin"""
 
+    def _format_blocked_sync_details(self, summary: dict[str, object]) -> str:
+        """Format unresolved blocked sync items for display in the popup."""
+        items = summary.get("blocked_details") or []
+        if not isinstance(items, list) or not items:
+            return ""
+        lines = ["", "Blocked items:"]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            entity = str(item.get("entity") or "item").capitalize()
+            title = str(item.get("title") or item.get("entity_id") or "(unknown)")
+            op = str(item.get("op") or "unknown")
+            reason = str(item.get("reason") or "Blocked by sync error")
+            server_version = item.get("server_version")
+            line = f"{entity} '{title}' · {op} · {reason}"
+            if server_version is not None:
+                line += f" (server version: {server_version})"
+            lines.append(line)
+        return "\n".join(lines)
+
     def _refresh_all_views(self, *, select_id: str | None = None) -> None:
         """Refresh all project-scoped tabs from the backend/local store."""
         self._refresh_risks(select_id=select_id)
         for fn in (
             self._refresh_action_risk_combo,
             self._refresh_actions,
-            #self._maybe_expand_title_column,
             self._refresh_matrix,
             self._refresh_top_history,
             self._refresh_assessments,
@@ -39,50 +58,40 @@ class ProjectsSyncMixin:
         projects = self._call_backend("Backend error", self.backend.list_projects)
         if projects is None:
             return
-
         for p in projects:
             item = QListWidgetItem(p.name)
             item.setData(Qt.UserRole, p.id)
             self.project_list.addItem(item)
-
         if self.project_list.count() <= 0:
             return
-
         if select_project_id:
             for i in range(self.project_list.count()):
                 it = self.project_list.item(i)
                 if str(it.data(Qt.UserRole)) == str(select_project_id):
                     self.project_list.setCurrentRow(i)
                     return
-
         self.project_list.setCurrentRow(0)
 
     def _on_project_selected(self) -> None:
-        # Best-effort commit of in-flight edits before switching projects.
         with contextlib.suppress(Exception):
             self._commit_editor_changes(refresh=False)
         with contextlib.suppress(Exception):
             self._commit_opp_editor_changes(refresh=False)
-
         items = self.project_list.selectedItems()
         if not items:
             return
-
         if self.current_project_id:
             self._risks_col_widths[self.current_project_id] = [
                 self.risks_table.columnWidth(c)
                 for c in range(self.risks_table.columnCount())
             ]
-
         self.current_project_id = items[0].data(Qt.UserRole)
         self.current_risk_id = None
         self.current_opportunity_id = None
         self.current_assessment_item_id = None
         self.current_assessment_item_type = "risk"
         self.editor_label.setText("Editor (new risk)")
-        # self.risk_form.set_values("", 3, 3)
         self.risk_form.set_values(title="", probability=3, impact=3)
-
         self._refresh_all_views()
         self._start_new_action()
 
@@ -91,25 +100,21 @@ class ProjectsSyncMixin:
         pending = 0
         blocked = 0
         can_sync = False
-
         if hasattr(self.backend, "pending_count"):
             try:
                 pending = self.backend.pending_count(pid)  # type: ignore[attr-defined]
             except Exception:
                 pending = 0
-
         if hasattr(self.backend, "blocked_count"):
             try:
                 blocked = self.backend.blocked_count(pid)  # type: ignore[attr-defined]
             except Exception:
                 blocked = 0
-
         if hasattr(self.backend, "can_sync"):
             try:
                 can_sync = bool(self.backend.can_sync())  # type: ignore[attr-defined]
             except Exception:
                 can_sync = False
-
         self.sync_btn.setEnabled(bool(pid) and can_sync)
         mode = "ONLINE" if can_sync else "OFFLINE"
         extra = f" · blocked: {blocked}" if blocked else ""
@@ -126,22 +131,22 @@ class ProjectsSyncMixin:
         if summary is None:
             self._update_sync_status()
             return
-
         # If the sync promoted a local-only project to a server project,
         # reload project list and keep the user on the migrated project.
         migrated_to = summary.get("project_id_migrated_to")
         if migrated_to:
             self._load_projects(select_project_id=str(migrated_to))
             self.current_project_id = str(migrated_to)
-
         # refresh UI from local store after sync
         self._refresh_all_views(select_id=self.current_risk_id)
-
+        blocked_details = self._format_blocked_sync_details(summary)
         QMessageBox.information(
             self,
             "Sync complete",
             f"Pushed: {summary.get('pushed')}\n"
             f"Conflicts rebased: {summary.get('conflicts')}\n"
             f"Errors blocked: {summary.get('errors')}\n"
-            f"Pulled risks: {summary.get('pulled_risks')}",
+            f"Still blocked: {summary.get('blocked', 0)}\n"
+            f"Pulled risks: {summary.get('pulled_risks')}"
+            f"{blocked_details}",
         )

@@ -1,3 +1,5 @@
+"""Server module for app."""
+
 from __future__ import annotations
 
 import inspect
@@ -40,6 +42,7 @@ ROUTERS = (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """Handle lifespan."""
     try:
         result = init_db()
         if inspect.isawaitable(result):
@@ -94,6 +97,7 @@ async def lifespan(_: FastAPI):
 
 
 def create_app() -> FastAPI:
+    """Create app."""
     app = FastAPI(title="Risk / Opportunity API", lifespan=lifespan)
     app.add_middleware(HttpsOnlyMiddleware)
     if GZIP_ENABLED:

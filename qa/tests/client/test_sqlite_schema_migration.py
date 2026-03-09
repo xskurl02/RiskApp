@@ -1,14 +1,18 @@
+"""Test module for test sqlite schema migration."""
+
 from __future__ import annotations
 
 import sqlite3
 
 
 def _create_legacy_db(path: str) -> None:
+    """Internal helper for create legacy db."""
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON;")
 
-    conn.executescript("""
+    conn.executescript(
+        """
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -45,7 +49,8 @@ def _create_legacy_db(path: str) -> None:
             FOREIGN KEY(project_id) REFERENCES projects(id),
             FOREIGN KEY(risk_id) REFERENCES risks(id)
         );
-        """)
+        """
+    )
 
     conn.execute("INSERT INTO projects (id, name, description) VALUES ('p1', 'P', '');")
     conn.execute(
@@ -62,6 +67,7 @@ def _create_legacy_db(path: str) -> None:
 def test_assessment_fk_migration_removes_risks_fk_and_adds_opportunity_id(
     tmp_path,
 ) -> None:
+    """Test that assessment fk migration removes risks fk and adds opportunity id."""
     db_file = tmp_path / "legacy.db"
     _create_legacy_db(str(db_file))
 

@@ -13,10 +13,12 @@ class AssessmentService:
     """Create/update my assessment locally and queue sync."""
 
     def __init__(self, store: LocalStore, outbox: OutboxStore) -> None:
+        """Internal helper for init."""
         self._store = store
         self._outbox = outbox
 
     def list(self, project_id: str, item_type: str, item_id: str) -> list[Assessment]:
+        """Return item."""
         return self._store.list_assessments(project_id, item_type, item_id)
 
     def upsert_my(
@@ -29,6 +31,7 @@ class AssessmentService:
         impact: int,
         notes: str | None = None,
     ) -> Assessment:
+        """Insert or update my."""
         assessment_id = str(
             uuid.uuid5(uuid.NAMESPACE_URL, f"assessment:{item_id}:{assessor_user_id}")
         )
@@ -80,6 +83,7 @@ class AssessmentService:
         )
 
     def _get_version_or_0(self, assessment_id: str) -> int:
+        """Internal helper for get version or 0."""
         try:
             _, version = self._store.get_assessment_project_and_version(assessment_id)
             return int(version)

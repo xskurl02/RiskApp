@@ -1,3 +1,5 @@
+"""Test module for test permissions."""
+
 from __future__ import annotations
 
 import uuid
@@ -6,6 +8,7 @@ import pytest
 
 
 def test_ensure_role_at_least_blocks_lower_roles() -> None:
+    """Test that ensure role at least blocks lower roles."""
     from fastapi import HTTPException
     from riskapp_server.core.permissions import ensure_role_at_least
     from riskapp_server.db.session import Role

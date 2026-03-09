@@ -40,12 +40,9 @@ def role_at_least(role: str | None, min_role: str | None) -> bool:
     If you need a more permissive behavior (e.g., treat empty min_role as
     "viewer"), implement that at the call-site explicitly.
     """
-
     role_key = normalize_role(role)
     min_key = normalize_role(min_role)
-
     min_rank = ROLE_RANK.get(min_key)
     if min_rank is None:
         return False
-
     return ROLE_RANK.get(role_key, 0) >= min_rank

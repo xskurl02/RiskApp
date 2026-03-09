@@ -1,10 +1,15 @@
+"""Test module for test scoring."""
+
 from __future__ import annotations
 
 
 def test_recalculate_item_scores_uses_max_impact_dimension() -> None:
+    """Test that recalculate item scores uses max impact dimension."""
     from riskapp_server.core.scoring import recalculate_item_scores
 
     class Obj:
+        """Represent Obj."""
+
         probability = 3
         impact = 1
         impact_cost = 2
@@ -21,9 +26,12 @@ def test_recalculate_item_scores_uses_max_impact_dimension() -> None:
 
 
 def test_recalculate_item_scores_no_dims_keeps_impact() -> None:
+    """Test that recalculate item scores no dims keeps impact."""
     from riskapp_server.core.scoring import recalculate_item_scores
 
     class Obj:
+        """Represent Obj."""
+
         probability = 2
         impact = 4
         impact_cost = None

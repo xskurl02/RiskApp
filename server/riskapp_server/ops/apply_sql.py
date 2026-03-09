@@ -50,6 +50,7 @@ def _resolve_database_url() -> str:
 
 
 def _iter_sql_files(paths: Iterable[Path]) -> list[Path]:
+    """Internal helper for iter sql files."""
     files: list[Path] = []
     for p in paths:
         if not p.exists():
@@ -177,6 +178,7 @@ def _split_sql(sql: str) -> Iterator[str]:
 
 
 def main(argv: list[str]) -> int:
+    """Handle main."""
     parser = argparse.ArgumentParser(
         prog="python -m riskapp_server.ops.apply_sql",
         description="Apply one or more .sql files to the configured database.",

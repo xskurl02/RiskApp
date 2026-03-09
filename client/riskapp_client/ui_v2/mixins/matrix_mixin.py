@@ -22,24 +22,20 @@ class MatrixMixin:
             p = max(1, min(5, int(getattr(it, "probability", 1))))
             i = max(1, min(5, int(getattr(it, "impact", 1))))
             grid[p - 1][i - 1] += 1
-
         for rp in range(5):
             for ci in range(5):
                 table.setItem(
                     rp, ci, self._mk_item(str(grid[rp][ci]), align_center=True)
                 )
-
         table.resizeColumnsToContents()
 
     def _refresh_matrix(self) -> None:
         pid = self.current_project_id
         if not pid:
             return
-
         kind = "risks"
         with contextlib.suppress(Exception):
             kind = (self.matrix_tab.kind_combo.currentText() or "Risks").strip().lower()
-
         if kind == "opportunities":
             opps = self._call_backend(
                 "Backend error", self.backend.list_opportunities, pid

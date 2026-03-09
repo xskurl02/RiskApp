@@ -12,7 +12,6 @@ modules.
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime
 from typing import Any
 
 from riskapp_client.adapters.local_storage.sqlite_data_store import LocalStore
@@ -28,7 +27,11 @@ from riskapp_client.domain.domain_models import (
 )
 from riskapp_client.services.action_management_service import ActionService
 from riskapp_client.services.assessment_management_service import AssessmentService
-from riskapp_client.services.entity_filters import ScoredFilterCriteria, filter_scored, parse_date
+from riskapp_client.services.entity_filters import (
+    ScoredFilterCriteria,
+    filter_scored,
+    parse_date,
+)
 from riskapp_client.services.member_management_service import MembersService
 from riskapp_client.services.scored_entity_management_service import (
     ScoredEntityService,
@@ -44,46 +47,86 @@ class OfflineFirstBackend(Backend):
         self.store = store
         self.remote = remote
         self.outbox = OutboxStore(store)
-        self._risks = ScoredEntityService(
-            ScoredEntityWiring(
-                kind="risk",
-                id_kw="risk_id",
-                model_cls=Risk,
-                list_fn=store.list_risks,
-                get_project_and_version_fn=store.get_risk_project_and_version,
-                get_row_fn=store.get_risk_row,
-                upsert_local_fn=store.upsert_local_risk,
-                queue_upsert_fn=self.outbox.queue_risk_upsert,
-                queue_delete_fn=self.outbox.queue_risk_delete,
-                discard_pending_changes_fn=lambda project_id, entity_id: self.outbox.discard_entity_changes(
-                    project_id, entity="risk", entity_id=entity_id
-                ),
-                soft_delete_local_fn=store.soft_delete_risk,
-                next_code_fn=store.next_risk_code,
-            )
+        self._risks = self._make_scored_service(
+            kind="risk",
+            id_kw="risk_id",
+            model_cls=Risk,
+            list_fn=store.list_risks,
+            get_project_and_version_fn=store.get_risk_project_and_version,
+            get_row_fn=store.get_risk_row,
+            upsert_local_fn=store.upsert_local_risk,
+            queue_upsert_fn=self.outbox.queue_risk_upsert,
+            queue_delete_fn=self.outbox.queue_risk_delete,
+            soft_delete_local_fn=store.soft_delete_risk,
+            next_code_fn=store.next_risk_code,
         )
-        self._opps = ScoredEntityService(
-            ScoredEntityWiring(
-                kind="opportunity",
-                id_kw="opportunity_id",
-                model_cls=Opportunity,
-                list_fn=store.list_opportunities,
-                get_project_and_version_fn=store.get_opportunity_project_and_version,
-                get_row_fn=store.get_opportunity_row,
-                upsert_local_fn=store.upsert_local_opportunity,
-                queue_upsert_fn=self.outbox.queue_opportunity_upsert,
-                queue_delete_fn=self.outbox.queue_opportunity_delete,
-                discard_pending_changes_fn=lambda project_id, entity_id: self.outbox.discard_entity_changes(
-                    project_id, entity="opportunity", entity_id=entity_id
-                ),
-                soft_delete_local_fn=store.soft_delete_opportunity,
-                next_code_fn=store.next_opportunity_code,
-            )
+        self._opps = self._make_scored_service(
+            kind="opportunity",
+            id_kw="opportunity_id",
+            model_cls=Opportunity,
+            list_fn=store.list_opportunities,
+            get_project_and_version_fn=store.get_opportunity_project_and_version,
+            get_row_fn=store.get_opportunity_row,
+            upsert_local_fn=store.upsert_local_opportunity,
+            queue_upsert_fn=self.outbox.queue_opportunity_upsert,
+            queue_delete_fn=self.outbox.queue_opportunity_delete,
+            soft_delete_local_fn=store.soft_delete_opportunity,
+            next_code_fn=store.next_opportunity_code,
         )
         self._actions = ActionService(store, self.outbox)
         self._assessments = AssessmentService(store, self.outbox)
         self._members = MembersService(remote)
         self._sync = SyncService(store, self.outbox, remote)
+
+    def _discard_scored_changes(
+        self,
+        entity: str,
+        project_id: str,
+        entity_id: str,
+    ) -> None:
+        self.outbox.discard_entity_changes(
+            project_id,
+            entity=entity,
+            entity_id=entity_id,
+        )
+
+    def _make_scored_service(
+        self,
+        *,
+        kind: str,
+        id_kw: str,
+        model_cls: type[Risk] | type[Opportunity],
+        list_fn: Any,
+        get_project_and_version_fn: Any,
+        get_row_fn: Any,
+        upsert_local_fn: Any,
+        queue_upsert_fn: Any,
+        queue_delete_fn: Any,
+        soft_delete_local_fn: Any,
+        next_code_fn: Any,
+    ) -> ScoredEntityService:
+        return ScoredEntityService(
+            ScoredEntityWiring(
+                kind=kind,
+                id_kw=id_kw,
+                model_cls=model_cls,
+                list_fn=list_fn,
+                get_project_and_version_fn=get_project_and_version_fn,
+                get_row_fn=get_row_fn,
+                upsert_local_fn=upsert_local_fn,
+                queue_upsert_fn=queue_upsert_fn,
+                queue_delete_fn=queue_delete_fn,
+                discard_pending_changes_fn=(
+                    lambda project_id, entity_id: self._discard_scored_changes(
+                        kind,
+                        project_id,
+                        entity_id,
+                    )
+                ),
+                soft_delete_local_fn=soft_delete_local_fn,
+                next_code_fn=next_code_fn,
+            )
+        )
 
     # ---- Projects ----
 
@@ -128,15 +171,8 @@ class OfflineFirstBackend(Backend):
 
     # ---- Risks ----
 
-    def list_risks(self, project_id: str) -> list[Risk]:
-        return self._risks.list(project_id)
-    def risks_report(self, project_id: str, **filters) -> dict:
-        if self.remote and getattr(self.remote, "risks_report", None):
-            return dict(self.remote.risks_report(project_id, **filters))
-
-        # Offline fallback: compute locally (same semantics as server-side filters where possible).
-
-        items = self._risks.list(project_id)
+    def _generate_scored_report(self, items: list, filters: dict) -> dict:
+        """Shared offline reporting logic for scored entities (risks & opps)."""
         dt_from = parse_date(str(filters.get("from_date") or ""))
         dt_to = parse_date(str(filters.get("to_date") or ""))
         if dt_to:
@@ -149,7 +185,9 @@ class OfflineFirstBackend(Backend):
             status=str(filters.get("status") or "(any)"),
             category_contains=str(filters.get("category") or ""),
             owner_user_id=(
-                str(filters.get("owner_user_id")) if filters.get("owner_user_id") else None
+                str(filters.get("owner_user_id"))
+                if filters.get("owner_user_id")
+                else None
             ),
             owner_unassigned=bool(filters.get("owner_unassigned")),
             identified_from=dt_from,
@@ -179,10 +217,24 @@ class OfflineFirstBackend(Backend):
             "max_score": max(scores) if scores else None,
             "avg_score": (sum(scores) / len(scores)) if scores else None,
             "status_counts": dict(Counter((x.status or "concept") for x in filtered)),
-            "category_counts": dict(Counter((x.category or "(none)") for x in filtered)),
-            "owner_counts": dict(Counter((x.owner_user_id or "(none)") for x in filtered)),
+            "category_counts": dict(
+                Counter((x.category or "(none)") for x in filtered)
+            ),
+            "owner_counts": dict(
+                Counter((x.owner_user_id or "(none)") for x in filtered)
+            ),
             "score_buckets": buckets,
         }
+
+    def list_risks(self, project_id: str) -> list[Risk]:
+        return self._risks.list(project_id)
+
+    def risks_report(self, project_id: str, **filters) -> dict:
+        if self.remote and getattr(self.remote, "risks_report", None):
+            return dict(self.remote.risks_report(project_id, **filters))
+
+        items = self._risks.list(project_id)
+        return self._generate_scored_report(items, filters)
 
     def create_risk(
         self, project_id: str, *, title: str, probability: int, impact: int, **meta
@@ -214,7 +266,7 @@ class OfflineFirstBackend(Backend):
             meta=meta,
         )
         if base_version is not None:
-            # Thread through explicit base_version overrides (useful for conflict rebasing).
+            # Thread through explicit base_version overrides.
             self.outbox.override_base_version(
                 project_id,
                 entity="risk",
@@ -230,59 +282,13 @@ class OfflineFirstBackend(Backend):
 
     def list_opportunities(self, project_id: str) -> list[Opportunity]:
         return self._opps.list(project_id)
+
     def opportunities_report(self, project_id: str, **filters) -> dict:
         if self.remote and getattr(self.remote, "opportunities_report", None):
             return dict(self.remote.opportunities_report(project_id, **filters))
 
-        # Offline fallback: compute locally (same semantics as server-side filters where possible).
-
         items = self._opps.list(project_id)
-        dt_from = parse_date(str(filters.get("from_date") or ""))
-        dt_to = parse_date(str(filters.get("to_date") or ""))
-        if dt_to:
-            dt_to = dt_to.replace(hour=23, minute=59, second=59)
-
-        crit = ScoredFilterCriteria(
-            search=str(filters.get("search") or ""),
-            min_score=int(filters.get("min_score") or 0),
-            max_score=int(filters.get("max_score") or 999_999),
-            status=str(filters.get("status") or "(any)"),
-            category_contains=str(filters.get("category") or ""),
-            owner_user_id=(
-                str(filters.get("owner_user_id")) if filters.get("owner_user_id") else None
-            ),
-            owner_unassigned=bool(filters.get("owner_unassigned")),
-            identified_from=dt_from,
-            identified_to=dt_to,
-        )
-        filtered = filter_scored(items, crit)
-        scores = [int(x.score or 0) for x in filtered]
-
-        buckets = {"0-4": 0, "5-9": 0, "10-14": 0, "15-19": 0, "20-25": 0}
-        for sc in scores:
-            v = int(sc or 0)
-            if v <= 4:
-                buckets["0-4"] += 1
-            elif v <= 9:
-                buckets["5-9"] += 1
-            elif v <= 14:
-                buckets["10-14"] += 1
-            elif v <= 19:
-                buckets["15-19"] += 1
-            else:
-                buckets["20-25"] += 1
-
-        return {
-            "total": len(filtered),
-            "project_total": len(items),
-            "min_score": min(scores) if scores else None,
-            "max_score": max(scores) if scores else None,
-            "avg_score": (sum(scores) / len(scores)) if scores else None,
-            "status_counts": dict(Counter((x.status or "concept") for x in filtered)),
-            "category_counts": dict(Counter((x.category or "(none)") for x in filtered)),
-            "owner_counts": dict(Counter((x.owner_user_id or "(none)") for x in filtered)),
-            "score_buckets": buckets,
-        }
+        return self._generate_scored_report(items, filters)
 
     def create_opportunity(
         self, project_id: str, *, title: str, probability: int, impact: int, **meta
@@ -408,3 +414,6 @@ class OfflineFirstBackend(Backend):
 
     def sync_project(self, project_id: str):
         return self._sync.sync_project(project_id)
+
+    def blocked_details(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        return self._sync.blocked_details(project_id)

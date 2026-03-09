@@ -5,9 +5,6 @@ Filtering, table rendering, editor behavior, and CSV export for opportunities.
 
 from __future__ import annotations
 
-# NOTE:
-# - CSV export lives under adapters/local_storage.
-# - Client-side filtering lives in services/entity_filters.
 from riskapp_client.adapters.local_storage import csv_data_exporter as export_csv
 from riskapp_client.services import entity_filters as filters
 from riskapp_client.ui_v2.mixins.scored_entity_mixin import ScoredEntityMixin
@@ -66,7 +63,6 @@ class OpportunitiesMixin(ScoredEntityMixin):
         if res is not None:
             self._opp_cache = res
             self._opp_title_by_id = {o.id: o.title for o in res.values()}
-        # self.opps_table.resizeColumnsToContents()
 
     def _on_opportunity_clicked(self, row: int, col: int) -> None:
         new_id = self._on_entity_clicked(
@@ -83,26 +79,17 @@ class OpportunitiesMixin(ScoredEntityMixin):
         )
         if new_id:
             self.current_opportunity_id = new_id
-            self.opps_tab.delete_btn.setVisible(
-                True
-            )  # <--- Show button for existing items
             self._opp_editor_dirty = False
-            self.current_assessment_item_type = "opportunity"
-            self.current_assessment_item_id = new_id
-            self._refresh_assessments()
+            self._sync_assessment_state("opportunity", new_id, self.opps_tab)
 
     def _start_new_opportunity(self) -> None:
-        # Avoid losing edits when switching to a fresh item.
         self._commit_opp_editor_changes(refresh=True)
         self.current_opportunity_id = None
-        self.opps_tab.delete_btn.setVisible(False)
-        self.current_assessment_item_id = None
-        self.current_assessment_item_type = "opportunity"
         self.opp_editor_label.setText("Editor (new opportunity)")
         self.opp_form.set_values(title="", probability=3, impact=3)
         self._opp_editor_dirty = False
         self.opps_table.clearSelection()
-        self._refresh_assessments()
+        self._sync_assessment_state("opportunity", None, self.opps_tab)
 
     def _save_opportunity(self, payload: dict) -> None:
         extra = [self._refresh_action_opp_combo, self._refresh_actions]
@@ -120,16 +107,13 @@ class OpportunitiesMixin(ScoredEntityMixin):
         if saved_id:
             self.current_opportunity_id = saved_id
             self._opp_editor_dirty = False
-            self.current_assessment_item_type = "opportunity"
-            self.current_assessment_item_id = saved_id
-            self._refresh_assessments()
+            self._sync_assessment_state("opportunity", saved_id, self.opps_tab)
 
     def _delete_opportunity(self) -> None:
         def refresh_all():
             self._refresh_opportunities()
             self._refresh_action_opp_combo()
             self._refresh_actions()
-            # If your matrix tab also draws opportunities, uncomment the next line:
             self._refresh_matrix()
 
         self._delete_entity(

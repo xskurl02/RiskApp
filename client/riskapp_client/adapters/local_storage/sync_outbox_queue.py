@@ -30,6 +30,7 @@ class PendingChange:
     record: dict[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
+        """Return the object as a dictionary."""
         return {
             "change_id": self.change_id,
             "entity": self.entity,
@@ -43,6 +44,7 @@ class OutboxStore:
     """Outbox queue for changes to be pushed to the server."""
 
     def __init__(self, store: LocalStore) -> None:
+        """Internal helper for init."""
         self._store = store
 
     @property
@@ -50,32 +52,95 @@ class OutboxStore:
         """Expose sqlite connection for rare advanced usage."""
         return self._store.conn
 
-    def pending_count(self, project_id: str | None = None) -> int:
+    def _count_by_status(self, status: str, project_id: str | None = None) -> int:
+        """Internal helper for count by status."""
+        where = "status=?"
+        params = [status]
         if project_id:
-            row = self.conn.execute(
-                "SELECT COUNT(*) AS c FROM outbox WHERE project_id=? AND status=?;",
-                (project_id, STATUS_PENDING),
-            ).fetchone()
-        else:
-            row = self.conn.execute(
-                "SELECT COUNT(*) AS c FROM outbox WHERE status=?;",
-                (STATUS_PENDING,),
-            ).fetchone()
+            where += " AND project_id=?"
+            params.append(project_id)
+        row = self.conn.execute(
+            f"SELECT COUNT(*) AS c FROM outbox WHERE {where};", params
+        ).fetchone()
         return int(row["c"]) if row else 0
+
+    def pending_count(self, project_id: str | None = None) -> int:
+        """Handle pending count."""
+        return self._count_by_status(STATUS_PENDING, project_id)
 
     def blocked_count(self, project_id: str | None = None) -> int:
         """Count changes that are blocked due to sync errors/conflicts."""
+        return self._count_by_status(STATUS_BLOCKED, project_id)
+
+    def _safe_json_loads(self, raw: str | None) -> dict[str, Any]:
+        """Best-effort decode of `last_error` payloads stored in the outbox."""
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return {"detail": str(raw)}
+        return parsed if isinstance(parsed, dict) else {"detail": str(parsed)}
+
+    def get_blocked_changes(
+        self, project_id: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Return blocked changes with user-facing conflict/error details."""
         if project_id:
-            row = self.conn.execute(
-                "SELECT COUNT(*) AS c FROM outbox WHERE project_id=? AND status=?;",
-                (project_id, STATUS_BLOCKED),
-            ).fetchone()
+            rows = self.conn.execute(
+                """
+                SELECT change_id, entity, op, entity_id, base_version, record_json, last_error
+                FROM outbox
+                WHERE project_id=? AND status=?
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (project_id, STATUS_BLOCKED, int(limit)),
+            ).fetchall()
         else:
-            row = self.conn.execute(
-                "SELECT COUNT(*) AS c FROM outbox WHERE status=?;",
-                (STATUS_BLOCKED,),
-            ).fetchone()
-        return int(row["c"]) if row else 0
+            rows = self.conn.execute(
+                """
+                SELECT change_id, entity, op, entity_id, base_version, record_json, last_error
+                FROM outbox
+                WHERE status=?
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (STATUS_BLOCKED, int(limit)),
+            ).fetchall()
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            record = json.loads(row["record_json"])
+            err = self._safe_json_loads(row["last_error"])
+            title = (
+                record.get("title")
+                or record.get("name")
+                or err.get("title")
+                or err.get("name")
+                or row["entity_id"]
+            )
+            out.append(
+                {
+                    "change_id": row["change_id"],
+                    "entity": row["entity"],
+                    "op": row["op"],
+                    "entity_id": row["entity_id"],
+                    "base_version": row["base_version"],
+                    "record": record,
+                    "title": str(title),
+                    "reason": str(
+                        err.get("reason")
+                        or err.get("message")
+                        or err.get("detail")
+                        or row["last_error"]
+                        or "Blocked by sync error"
+                    ),
+                    "server_version": err.get("server_version"),
+                    "detail": err,
+                }
+            )
+        return out
 
     def _replace_outbox_entry(
         self,
@@ -88,6 +153,7 @@ class OutboxStore:
         record: dict[str, Any],
     ) -> str:
         # squash: keep only one pending change per (entity, entity_id)
+        """Internal helper for replace outbox entry."""
         cur = self.conn.cursor()
         cur.execute(
             "DELETE FROM outbox "
@@ -95,7 +161,6 @@ class OutboxStore:
             "AND status IN (?, ?);",
             (project_id, entity, entity_id, STATUS_PENDING, STATUS_BLOCKED),
         )
-
         change_id = str(uuid.uuid4())
         # NOTE: use SQL parameters for status values; do not embed placeholders.
         cur.execute(
@@ -135,7 +200,6 @@ class OutboxStore:
         knows the server_version to target and wants to avoid relying on the local
         row version.
         """
-
         if base_version is None:
             return
         try:
@@ -150,7 +214,9 @@ class OutboxStore:
         )
         self.conn.commit()
 
-    def discard_entity_changes(self, project_id: str, *, entity: str, entity_id: str) -> None:
+    def discard_entity_changes(
+        self, project_id: str, *, entity: str, entity_id: str
+    ) -> None:
         """Drop queued pending/blocked changes for one entity.
 
         Used when an entity was created locally and deleted before first sync:
@@ -173,10 +239,10 @@ class OutboxStore:
         record: dict[str, Any],
         get_project_and_version: Callable[[str], tuple[str, int]],
     ) -> None:
+        """Internal helper for queue scored upsert."""
         entity_id = str(record["id"])
         _, ver = get_project_and_version(entity_id)
         base_v = ver if ver >= 1 else None
-
         clean = {
             k: record.get(k) for k in SCORED_ENTITY_OUTBOX_ALLOWED_KEYS if k in record
         }
@@ -184,7 +250,6 @@ class OutboxStore:
         clean["title"] = str(clean.get("title") or "")
         clean["probability"] = int(clean.get("probability") or 1)
         clean["impact"] = int(clean.get("impact") or 1)
-
         self._replace_outbox_entry(
             project_id=project_id,
             entity=entity,
@@ -203,9 +268,9 @@ class OutboxStore:
         record: dict[str, Any],
         get_project_and_version: Callable[[str], tuple[str, int]],
     ) -> None:
+        """Internal helper for queue simple upsert."""
         _, ver = get_project_and_version(entity_id)
         base_v = ver if ver >= 1 else None
-
         self._replace_outbox_entry(
             project_id=project_id,
             entity=entity,
@@ -224,16 +289,29 @@ class OutboxStore:
             get_project_and_version=self._store.get_risk_project_and_version,
         )
 
-    def queue_risk_delete(self, project_id: str, risk_id: str) -> None:
-        _, ver = self._store.get_risk_project_and_version(risk_id)
+    def _queue_delete(
+        self,
+        project_id: str,
+        entity: str,
+        entity_id: str,
+        get_project_and_version: Callable,
+    ) -> None:
+        """Internal helper for queue delete."""
+        _, ver = get_project_and_version(entity_id)
         base_v = ver if ver >= 1 else None
         self._replace_outbox_entry(
             project_id=project_id,
-            entity="risk",
+            entity=entity,
             op="delete",
-            entity_id=risk_id,
+            entity_id=entity_id,
             base_version=base_v,
-            record={"id": risk_id},
+            record={"id": entity_id},
+        )
+
+    def queue_risk_delete(self, project_id: str, risk_id: str) -> None:
+        """Queue risk delete."""
+        self._queue_delete(
+            project_id, "risk", risk_id, self._store.get_risk_project_and_version
         )
 
     def queue_opportunity_upsert(self, project_id: str, record: dict[str, Any]) -> None:
@@ -246,15 +324,12 @@ class OutboxStore:
         )
 
     def queue_opportunity_delete(self, project_id: str, opportunity_id: str) -> None:
-        _, ver = self._store.get_opportunity_project_and_version(opportunity_id)
-        base_v = ver if ver >= 1 else None
-        self._replace_outbox_entry(
-            project_id=project_id,
-            entity="opportunity",
-            op="delete",
-            entity_id=opportunity_id,
-            base_version=base_v,
-            record={"id": opportunity_id},
+        """Queue opportunity delete."""
+        self._queue_delete(
+            project_id,
+            "opportunity",
+            opportunity_id,
+            self._store.get_opportunity_project_and_version,
         )
 
     def queue_action_upsert(
@@ -292,6 +367,7 @@ class OutboxStore:
     def get_pending_changes(
         self, project_id: str, limit: int = 100
     ) -> list[dict[str, Any]]:
+        """Return pending changes."""
         rows = self.conn.execute(
             """
             SELECT change_id, entity, op, base_version, record_json
@@ -302,7 +378,6 @@ class OutboxStore:
             """,
             (project_id, STATUS_PENDING, int(limit)),
         ).fetchall()
-
         out: list[dict[str, Any]] = []
         for row in rows:
             out.append(
@@ -317,6 +392,7 @@ class OutboxStore:
         return out
 
     def delete_outbox_ids(self, change_ids: list[str]) -> None:
+        """Delete outbox ids."""
         if not change_ids:
             return
         q = ",".join(["?"] * len(change_ids))
@@ -324,6 +400,7 @@ class OutboxStore:
         self.conn.commit()
 
     def block_outbox_id(self, change_id: str, err: str) -> None:
+        """Handle block outbox id."""
         self.conn.execute(
             "UPDATE outbox SET status=?, last_error=? WHERE change_id=?;",
             (STATUS_BLOCKED, err[:500], change_id),
@@ -333,22 +410,19 @@ class OutboxStore:
     def requeue_conflict_with_new_id(
         self, change_id: str, server_version: int
     ) -> str | None:
+        """Handle requeue conflict with new id."""
         row = self.conn.execute(
             "SELECT * FROM outbox WHERE change_id=?;", (change_id,)
         ).fetchone()
         if not row:
             return None
-
         project_id = row["project_id"]
         entity = row["entity"]
         op = row["op"]
         entity_id = row["entity_id"]
         record = json.loads(row["record_json"])
-
-        # Delete old (server stored a receipt for conflict; resending same change_id becomes duplicate)
         self.conn.execute("DELETE FROM outbox WHERE change_id=?;", (change_id,))
         self.conn.commit()
-
         return self._replace_outbox_entry(
             project_id=project_id,
             entity=entity,

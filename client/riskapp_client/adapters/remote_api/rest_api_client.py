@@ -1,3 +1,5 @@
+"""Client module for rest api client."""
+
 from __future__ import annotations
 
 import base64
@@ -41,11 +43,13 @@ class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
     """
 
     def __init__(self, *, allowed_scheme: str, allowed_netloc: str) -> None:
+        """Internal helper for init."""
         super().__init__()
         self._allowed_scheme = allowed_scheme
         self._allowed_netloc = allowed_netloc
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        """Handle redirect request."""
         parsed = urllib.parse.urlparse(newurl)
         if parsed.scheme and parsed.scheme != self._allowed_scheme:
             raise urllib.error.HTTPError(
@@ -59,6 +63,7 @@ class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 def _jwt_sub(token: str) -> str | None:
+    """Internal helper for jwt sub."""
     try:
         parts = token.split(".")
         if len(parts) < 2:
@@ -73,13 +78,15 @@ def _jwt_sub(token: str) -> str | None:
 
 
 class FakeBackend:
+    """Represent Fake Backend."""
+
     def __init__(self) -> None:
+        """Internal helper for init."""
         p1 = Project(id=str(uuid.uuid4()), name="MPR Project", description="Fake data")
         p2 = Project(
             id=str(uuid.uuid4()), name="Demo Project", description="More fake data"
         )
         self.projects: list[Project] = [p1, p2]
-
         self.risks: dict[str, list[Risk]] = {
             p1.id: [
                 Risk(
@@ -114,7 +121,6 @@ class FakeBackend:
                 ),
             ],
         }
-
         self.opportunities: dict[str, list[Opportunity]] = {
             p1.id: [
                 Opportunity(
@@ -146,84 +152,128 @@ class FakeBackend:
         # Minimal in-memory assessments store for demo usage.
         self._assessments: dict[tuple[str, str], list[Assessment]] = {}
 
+    def _sorted_scored(
+        self, items: list[Risk] | list[Opportunity]
+    ) -> list[Risk] | list[Opportunity]:
+        """Internal helper for sorted scored."""
+        return sorted(items, key=lambda item: (item.score, item.title), reverse=True)
+
+    def _create_scored(
+        self,
+        project_id: str,
+        store: dict[str, list[Risk]] | dict[str, list[Opportunity]],
+        model_cls: type[Risk] | type[Opportunity],
+        *,
+        title: str,
+        probability: int,
+        impact: int,
+    ) -> Risk | Opportunity:
+        """Internal helper for create scored."""
+        item = model_cls(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            title=title,
+            probability=probability,
+            impact=impact,
+        )
+        store.setdefault(project_id, []).append(item)
+        return item
+
+    def _update_scored(
+        self,
+        entity_id: str,
+        store: dict[str, list[Risk]] | dict[str, list[Opportunity]],
+        model_cls: type[Risk] | type[Opportunity],
+        *,
+        title: str,
+        probability: int,
+        impact: int,
+        missing_message: str,
+    ) -> Risk | Opportunity:
+        """Internal helper for update scored."""
+        for items in store.values():
+            for index, item in enumerate(items):
+                if item.id == entity_id:
+                    items[index] = model_cls(
+                        id=item.id,
+                        project_id=item.project_id,
+                        title=title,
+                        probability=probability,
+                        impact=impact,
+                    )
+                    return items[index]
+        raise KeyError(missing_message)
+
     def list_projects(self) -> list[Project]:
+        """Return projects."""
         return list(self.projects)
 
     def list_risks(self, project_id: str) -> list[Risk]:
-        return sorted(
-            self.risks.get(project_id, []),
-            key=lambda r: (r.score, r.title),
-            reverse=True,
-        )
+        """Return risks."""
+        return list(self._sorted_scored(self.risks.get(project_id, [])))
 
     def create_risk(
         self, project_id: str, title: str, probability: int, impact: int
     ) -> Risk:
-        r = Risk(
-            id=str(uuid.uuid4()),
-            project_id=project_id,
+        """Create risk."""
+        return self._create_scored(
+            project_id,
+            self.risks,
+            Risk,
             title=title,
             probability=probability,
             impact=impact,
         )
-        self.risks.setdefault(project_id, []).append(r)
-        return r
 
     def update_risk(
         self, risk_id: str, title: str, probability: int, impact: int
     ) -> Risk:
-        for _pid, lst in self.risks.items():
-            for i, r in enumerate(lst):
-                if r.id == risk_id:
-                    lst[i] = Risk(
-                        id=r.id,
-                        project_id=r.project_id,
-                        title=title,
-                        probability=probability,
-                        impact=impact,
-                    )
-                    return lst[i]
-        raise KeyError("risk not found")
+        """Update risk."""
+        return self._update_scored(
+            risk_id,
+            self.risks,
+            Risk,
+            title=title,
+            probability=probability,
+            impact=impact,
+            missing_message="risk not found",
+        )
 
     def list_opportunities(self, project_id: str) -> list[Opportunity]:
-        return sorted(
-            self.opportunities.get(project_id, []),
-            key=lambda o: (o.score, o.title),
-            reverse=True,
-        )
+        """Return opportunities."""
+        return list(self._sorted_scored(self.opportunities.get(project_id, [])))
 
     def create_opportunity(
         self, project_id: str, title: str, probability: int, impact: int
     ) -> Opportunity:
-        o = Opportunity(
-            id=str(uuid.uuid4()),
-            project_id=project_id,
+        """Create opportunity."""
+        return self._create_scored(
+            project_id,
+            self.opportunities,
+            Opportunity,
             title=title,
             probability=probability,
             impact=impact,
         )
-        self.opportunities.setdefault(project_id, []).append(o)
-        return o
 
     def update_opportunity(
         self, opportunity_id: str, title: str, probability: int, impact: int
     ) -> Opportunity:
-        for _pid, lst in self.opportunities.items():
-            for i, o in enumerate(lst):
-                if o.id == opportunity_id:
-                    lst[i] = Opportunity(
-                        id=o.id,
-                        project_id=o.project_id,
-                        title=title,
-                        probability=probability,
-                        impact=impact,
-                    )
-                    return lst[i]
-        raise KeyError("opportunity not found")
+        """Update opportunity."""
+        return self._update_scored(
+            opportunity_id,
+            self.opportunities,
+            Opportunity,
+            title=title,
+            probability=probability,
+            impact=impact,
+            missing_message="opportunity not found",
+        )
 
     def list_assessments(
         self, project_id: str, item_type: str, item_id: str
     ) -> list[Assessment]:
+        """Return assessments."""
         _ = item_type  # unused (items share UUID space in the demo)
         return list(self._assessments.get((project_id, item_id), []))
 
@@ -236,6 +286,7 @@ class FakeBackend:
         impact: int,
         notes: str | None = None,
     ) -> Assessment:
+        """Insert or update my assessment."""
         assessor = "demo-user"
         aid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"assessment:{item_id}:{assessor}"))
         a = Assessment(
@@ -254,7 +305,10 @@ class FakeBackend:
 
 
 class ApiError(RuntimeError):
+    """Represent Api Error."""
+
     def __init__(self, status: int, detail: str) -> None:
+        """Internal helper for init."""
         super().__init__(f"HTTP {status}: {detail}")
         self.status = status
         self.detail = detail
@@ -283,25 +337,23 @@ class ApiBackend:
         timeout_s: int = 6,
         url_policy: UrlPolicy | None = None,
     ) -> None:
+        """Internal helper for init."""
         if url_policy is None:
             url_policy = UrlPolicy(
                 allow_http_anywhere=os.getenv("RISKAPP_ALLOW_HTTP", "").strip() == "1"
             )
         self.base_url = validate_base_url(base_url, url_policy)
         parsed_base = urllib.parse.urlparse(self.base_url)
-
         handlers: list[urllib.request.BaseHandler] = [
             _SameOriginRedirectHandler(
                 allowed_scheme=parsed_base.scheme,
                 allowed_netloc=parsed_base.netloc,
             )
         ]
-
         # Explicit TLS context (defensive; uses system trust store).
         if parsed_base.scheme == "https":
             ssl_context = ssl.create_default_context()
             handlers.insert(0, urllib.request.HTTPSHandler(context=ssl_context))
-
         self._opener = urllib.request.build_opener(*handlers)
         self.email = email
         self.timeout_s = timeout_s
@@ -330,32 +382,26 @@ class ApiBackend:
         """
         if not path.startswith("/"):
             raise ValueError("API path must start with '/'")
-
         method_up = (method or "").strip().upper()
         if method_up not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
             raise ValueError(f"Unsupported HTTP method: {method_up}")
-
         url = f"{self.base_url}{path}"
         headers: dict[str, str] = {
             "Accept": "application/json",
             "User-Agent": "RiskAppClient/1.0",
         }
         data: bytes | None = None
-
         if auth:
             if not self.token:
                 raise ApiError(401, "Not logged in")
             headers["Authorization"] = f"Bearer {self.token}"
-
         if json_body is not None:
             data = json.dumps(json_body).encode("utf-8")
             headers["Content-Type"] = "application/json"
         elif form_body is not None:
             data = urllib.parse.urlencode(form_body).encode("utf-8")
             headers["Content-Type"] = "application/x-www-form-urlencoded"
-
         req = urllib.request.Request(url, data=data, headers=headers, method=method_up)
-
         try:
             with self._opener.open(req, timeout=self.timeout_s) as resp:
                 content_type = (
@@ -373,7 +419,6 @@ class ApiBackend:
                 if content_type not in {"application/json", ""}:
                     raise ApiError(0, f"Unexpected Content-Type: {content_type}")
                 return json.loads(raw)
-
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="replace")
             try:
@@ -381,8 +426,6 @@ class ApiBackend:
                 detail = payload.get("detail", raw)
             except Exception:
                 detail = raw
-
-            # If access token expired, attempt a refresh once.
             if exc.code == 401 and auth and _retry_on_401 and self.refresh_token:
                 try:
                     self._refresh_access_token()
@@ -402,6 +445,7 @@ class ApiBackend:
             raise ApiError(0, f"Cannot reach server: {exc}") from exc
 
     def _login(self, password: str) -> None:
+        """Internal helper for login."""
         j = self._req(
             "POST",
             "/login",
@@ -416,6 +460,7 @@ class ApiBackend:
         self.user_id = _jwt_sub(token)
 
     def _refresh_access_token(self) -> None:
+        """Internal helper for refresh access token."""
         if not self.refresh_token:
             raise ApiError(401, "Missing refresh token")
         j = self._req(
@@ -434,6 +479,7 @@ class ApiBackend:
         self.user_id = _jwt_sub(token)
 
     def _to_project(self, j) -> Project:
+        """Internal helper for to project."""
         return Project(
             id=str(j["id"]),
             name=j.get("name", ""),
@@ -441,12 +487,15 @@ class ApiBackend:
         )
 
     def _to_risk(self, j) -> Risk:
+        """Internal helper for to risk."""
         return scored_entity_from_mapping(j, model_cls=Risk)
 
     def _to_opportunity(self, j) -> Opportunity:
+        """Internal helper for to opportunity."""
         return scored_entity_from_mapping(j, model_cls=Opportunity)
 
     def _to_action(self, j) -> Action:
+        """Internal helper for to action."""
         return action_from_mapping(j)
 
     def _build_scored_payload(
@@ -470,6 +519,7 @@ class ApiBackend:
         return urllib.parse.urlencode(params)
 
     def list_projects(self) -> list[Project]:
+        """Return projects."""
         j = self._req("GET", "/projects")
         projects = [self._to_project(x) for x in (j or [])]
         if not projects and self.auto_create_project:
@@ -488,12 +538,12 @@ class ApiBackend:
         This is used by the offline-first sync when promoting a local-only project
         to a real server project.
         """
-
         body = {"name": str(name or "Project"), "description": str(description or "")}
         j = self._req("POST", "/projects", json_body=body)
         return self._to_project(j)
 
     def _to_assessment(self, j) -> Assessment:
+        """Internal helper for to assessment."""
         return assessment_from_mapping(j)
 
     # --- Opportunities ---
@@ -512,6 +562,7 @@ class ApiBackend:
         from_date: str | None = None,  # "YYYY-MM-DD"
         to_date: str | None = None,  # "YYYY-MM-DD"
     ) -> list[Opportunity]:
+        """Return opportunities."""
         qs = self._build_list_qs(
             search=search,
             min_score=min_score,
@@ -542,6 +593,7 @@ class ApiBackend:
         from_date: str | None = None,
         to_date: str | None = None,
     ) -> dict:
+        """Handle opportunities report."""
         qs = self._build_list_qs(
             search=search,
             min_score=min_score,
@@ -559,6 +611,7 @@ class ApiBackend:
     def create_opportunity(
         self, project_id: str, *, title: str, probability: int, impact: int, **meta
     ) -> Opportunity:
+        """Create opportunity."""
         body = self._build_scored_payload(title, probability, impact, meta)
         j = self._req("POST", f"/projects/{project_id}/opportunities", json_body=body)
         return self._to_opportunity(j)
@@ -574,6 +627,7 @@ class ApiBackend:
         base_version: int | None = None,
         **meta,
     ) -> Opportunity:
+        """Update opportunity."""
         body = self._build_scored_payload(title, probability, impact, meta)
 
         if base_version is not None:
@@ -587,6 +641,7 @@ class ApiBackend:
         return self._to_opportunity(j)
 
     def delete_opportunity(self, project_id: str, opportunity_id: str) -> None:
+        """Delete opportunity."""
         self._req(
             "DELETE",
             f"/projects/{project_id}/opportunities/{opportunity_id}",
@@ -595,6 +650,7 @@ class ApiBackend:
     def list_assessments(
         self, project_id: str, item_type: str, item_id: str
     ) -> list[Assessment]:
+        """Return assessments."""
         prefix = "risks" if item_type == "risk" else "opportunities"
         j = self._req("GET", f"/projects/{project_id}/{prefix}/{item_id}/assessments")
         return [self._to_assessment(x) for x in (j or [])]
@@ -608,6 +664,7 @@ class ApiBackend:
         impact: int,
         notes: str | None = None,
     ) -> Assessment:
+        """Insert or update my assessment."""
         prefix = "risks" if item_type == "risk" else "opportunities"
         j = self._req(
             "PUT",
@@ -621,6 +678,7 @@ class ApiBackend:
         return self._to_assessment(j)
 
     def current_user_id(self) -> str | None:
+        """Handle current user id."""
         return self.user_id
 
     def list_risks(
@@ -639,6 +697,7 @@ class ApiBackend:
         ) = None,  # "YYYY-MM-DD" (or pass a date and .isoformat() before calling)
         to_date: str | None = None,  # "YYYY-MM-DD"
     ) -> list[Risk]:
+        """Return risks."""
         qs = self._build_list_qs(
             search=search,
             min_score=min_score,
@@ -668,6 +727,7 @@ class ApiBackend:
         from_date: str | None = None,
         to_date: str | None = None,
     ) -> dict:
+        """Handle risks report."""
         qs = self._build_list_qs(
             search=search,
             min_score=min_score,
@@ -685,6 +745,7 @@ class ApiBackend:
     def create_risk(
         self, project_id: str, *, title: str, probability: int, impact: int, **meta
     ) -> Risk:
+        """Create risk."""
         body = self._build_scored_payload(title, probability, impact, meta)
         j = self._req("POST", f"/projects/{project_id}/risks", json_body=body)
         return self._to_risk(j)
@@ -700,6 +761,7 @@ class ApiBackend:
         base_version: int | None = None,
         **meta,
     ) -> Risk:
+        """Update risk."""
         body = self._build_scored_payload(title, probability, impact, meta)
         if base_version is not None:
             body["base_version"] = int(base_version)
@@ -710,6 +772,7 @@ class ApiBackend:
         return self._to_risk(j)
 
     def delete_risk(self, project_id: str, risk_id: str) -> None:
+        """Delete risk."""
         self._req("DELETE", f"/projects/{project_id}/risks/{risk_id}")
 
     def sync_pull(
@@ -720,7 +783,7 @@ class ApiBackend:
         limit_per_entity: int | None = None,
         cursors: dict[str, str] | None = None,
     ):
-        # Server expects body {project_id, since} but trusts path over body.
+        """Synchronize pull."""
         body: dict[str, object] = {"project_id": project_id, "since": since_iso}
         if limit_per_entity is not None:
             body["limit_per_entity"] = int(limit_per_entity)
@@ -729,6 +792,7 @@ class ApiBackend:
         return self._req("POST", f"/projects/{project_id}/sync/pull", json_body=body)
 
     def sync_push(self, project_id: str, changes):
+        """Synchronize push."""
         return self._req(
             "POST",
             f"/projects/{project_id}/sync/push",
@@ -736,17 +800,19 @@ class ApiBackend:
         )
 
     def create_snapshot(self, project_id: str, *, kind: str | None = None):
-        # kind: risks|opportunities|both (server defaults to both)
+        """Create snapshot."""
         if kind:
             qs = urllib.parse.urlencode({"kind": kind})
             return self._req("POST", f"/projects/{project_id}/snapshots?{qs}")
         return self._req("POST", f"/projects/{project_id}/snapshots")
 
     def latest_snapshot(self, project_id: str, *, kind: str = "risks"):
+        """Handle latest snapshot."""
         qs = urllib.parse.urlencode({"kind": kind})
         return self._req("GET", f"/projects/{project_id}/snapshots/latest?{qs}")
 
     def list_actions(self, project_id: str) -> list[Action]:
+        """Return actions."""
         j = self._req("GET", f"/projects/{project_id}/actions")
         return [self._to_action(x) for x in (j or [])]
 
@@ -762,6 +828,7 @@ class ApiBackend:
         status: str,
         owner_user_id: str | None,
     ) -> Action:
+        """Create action."""
         body = {
             "kind": kind,
             "title": title,
@@ -791,6 +858,7 @@ class ApiBackend:
         status: str,
         owner_user_id: str | None,
     ) -> Action:
+        """Update action."""
         body = {
             "kind": kind,
             "title": title,
@@ -798,7 +866,6 @@ class ApiBackend:
             "status": status,
             "owner_user_id": owner_user_id,
         }
-        # allow retargeting (server enforces XOR)
         if target_type == "risk":
             body["risk_id"] = target_id
             body["opportunity_id"] = None
@@ -820,17 +887,17 @@ class ApiBackend:
         from_ts: str | None = None,
         to_ts: str | None = None,
     ):
+        """Handle top history."""
         params = {"kind": kind, "limit": str(int(limit))}
         if from_ts:
             params["from_ts"] = from_ts
         if to_ts:
             params["to_ts"] = to_ts
-
         qs = urllib.parse.urlencode(params)
         return self._req("GET", f"/projects/{project_id}/top-history?{qs}")
 
-    # --- Members / roles ---
     def list_members(self, project_id: str) -> list[Member]:
+        """Return members."""
         j = self._req("GET", f"/projects/{project_id}/members")
         out: list[Member] = []
         for m in j or []:
@@ -845,6 +912,7 @@ class ApiBackend:
         return out
 
     def add_member(self, project_id: str, *, user_email: str, role: str) -> None:
+        """Add member."""
         self._req(
             "POST",
             f"/projects/{project_id}/members",
@@ -852,4 +920,5 @@ class ApiBackend:
         )
 
     def remove_member(self, project_id: str, *, member_user_id: str) -> None:
+        """Remove member."""
         self._req("DELETE", f"/projects/{project_id}/members/{member_user_id}")

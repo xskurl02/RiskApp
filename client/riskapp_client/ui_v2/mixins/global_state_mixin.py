@@ -7,13 +7,14 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
+from contextlib import suppress
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from riskapp_client.domain.domain_models import Opportunity, Risk
 
-from PySide6.QtCore import QEvent, QObject, Qt  # pylint: disable=no-name-in-module
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QDateTimeEdit,
@@ -21,7 +22,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QTableWidget,
     QTableWidgetItem,
-)  # pylint: disable=no-name-in-module
+)
 from riskapp_client.domain.scored_entity_fields import ALL_STATUSES, DEFAULT_STATUS
 from riskapp_client.utils.role_permission_evaluator import role_at_least
 
@@ -32,7 +33,6 @@ class CoreMixin:
     """MainWindow mixin: CoreMixin"""
 
     def _init_state(self) -> None:
-        """Initialize MainWindow state (non-UI fields)."""
         self.current_project_id: str | None = None
         self.current_risk_id: str | None = None
         self.current_opportunity_id: str | None = None
@@ -57,7 +57,7 @@ class CoreMixin:
         self._risk_title_by_id: dict[str, str] = {}
 
     def _detect_offline_mode(self) -> bool:
-        """Return True if this is the OfflineBackend running without a remote (server) connection."""
+        """Return True if this is the OfflineBackend running without connection."""
         return bool(hasattr(self.backend, "remote") and self.backend.remote is None)
 
     def _set_role_status(self, *, role: str, offline: bool, assumed: bool) -> None:
@@ -77,27 +77,23 @@ class CoreMixin:
         In offline mode we may not know the user's real role (no members list),
         so we assume "member" to keep offline-first editing usable.
         """
-
         if self._offline_mode and self.current_role == "unknown":
             return "member"
         return self.current_role
 
     def _can_mark_deleted(self) -> bool:
         """Return True if the user can set status=deleted in the UI."""
-
         return bool(self.current_project_id) and role_at_least(
             self._role_for_local_edits(), "manager"
         )
 
     def _apply_permissions(self) -> None:
-        """Enable/disable UI controls based on the user's role and online/offline state."""
+        """Enable/disable UI controls based on the user's role and state."""
         pid = self.current_project_id
-
         role_for_local = self._role_for_local_edits()
         assumed_member_offline = bool(
             self._offline_mode and self.current_role == "unknown"
         )
-
         can_edit_local = bool(pid) and role_at_least(role_for_local, "member")
         can_take_snapshots = (
             bool(pid)
@@ -109,9 +105,7 @@ class CoreMixin:
             and (not self._offline_mode)
             and role_at_least(self.current_role, "admin")
         )
-
         can_set_deleted = self._can_mark_deleted()
-
         # Update role label if we auto-assumed member offline.
         if assumed_member_offline and not self._role_assumed:
             suffix = ""
@@ -120,7 +114,6 @@ class CoreMixin:
             suffix += " (assumed)"
             self.role_status.setText(f"Role: {role_for_local}{suffix}")
             self._role_assumed = True
-
         # --- Risks / Opportunities editors ---
         for btn, form in [
             (self.new_risk_btn, self.risk_form),
@@ -131,14 +124,10 @@ class CoreMixin:
                 form.set_editable(can_edit_local)
             elif hasattr(form, "btn"):
                 form.btn.setEnabled(can_edit_local)
-
             # UX gate: only managers+ can set status=deleted.
             if hasattr(form, "set_allow_deleted_status"):
-                try:
+                with suppress(Exception):
                     form.set_allow_deleted_status(bool(can_set_deleted))
-                except Exception:
-                    pass
-
         # --- Actions editor ---
         for w in (
             self.actions_tab.action_target_type,
@@ -153,7 +142,6 @@ class CoreMixin:
             self.actions_tab.action_new_btn,
         ):
             w.setEnabled(can_edit_local)
-
         # --- Assessments ---
         for w in (
             self.assessments_tab.assess_p,
@@ -162,25 +150,19 @@ class CoreMixin:
             self.assessments_tab.assess_save_btn,
         ):
             w.setEnabled(can_edit_local)
-
         # --- Snapshots / history ---
         self.top_tab.snapshot_btn.setEnabled(can_take_snapshots)
         self.top_tab.auto_snapshot_chk.setEnabled(can_take_snapshots)
         self.top_tab.auto_snapshot_kind.setEnabled(can_take_snapshots)
         self.top_tab.auto_snapshot_days.setEnabled(can_take_snapshots)
-
         # --- Members management (admin only, online only) ---
         self.members_tab.member_email.setEnabled(can_manage_members)
         self.members_tab.member_role.setEnabled(can_manage_members)
         self.members_tab.member_add_btn.setEnabled(can_manage_members)
         self.members_tab.member_remove_btn.setEnabled(can_manage_members)
-
-        # Refresh is harmless even offline (it will just show the offline hint / cached data).
+        # Refresh is harmless even offline.
         self.members_tab.member_refresh_btn.setEnabled(bool(pid))
 
-    # -------------------------
-    # Shared UI helpers (scored entities)
-    # -------------------------
     def _mk_item(
         self,
         text: str,
@@ -207,7 +189,6 @@ class CoreMixin:
         if not entity_id:
             return
         target = str(entity_id)
-
         for row in range(table.rowCount()):
             it = table.item(row, id_col)
             if it and str(it.data(Qt.UserRole)) == target:
@@ -221,14 +202,12 @@ class CoreMixin:
         fn: Callable[..., T],
         *args: Any,
         **kwargs: Any,
-        # self, title: str, fn: Callable[..., T], *args: Any, **kwargs: Any
     ) -> T | None:
         """Call a backend function and show a modal error if it fails."""
         try:
             return fn(*args, **kwargs)
         except Exception as exc:
             QMessageBox.critical(self, error_title, str(exc))
-            # QMessageBox.critical(self, title, str(exc))
             return None
 
     def _update_scored_filter_report(
@@ -247,7 +226,6 @@ class CoreMixin:
         if not filtered and not server_report:
             label.setText(f"Showing 0/{full_count}")
             return
-
         if server_report:
             total = server_report.get("total")
             proj_total = server_report.get("project_total")
@@ -255,7 +233,6 @@ class CoreMixin:
             mx = server_report.get("max_score")
             avg_raw = server_report.get("avg_score")
             avg = float(avg_raw) if avg_raw is not None else None
-
             status_counts = server_report.get("status_counts") or {}
             category_counts = server_report.get("category_counts") or {}
             top_cats = [
@@ -267,13 +244,11 @@ class CoreMixin:
                 )[:3]
                 if c and c != "(none)" and int(n or 0) > 0
             ]
-
             local_bits = f"Local {len(filtered)}/{full_count}"
             server_bits = (
                 f"Server {int(total) if total is not None else '?'}"
                 f"/{int(proj_total) if proj_total is not None else '?'}"
             )
-
             lines = [
                 (
                     f"{local_bits} · {server_bits} · score min {mn} · max {mx} · avg {avg:.1f}"
@@ -281,8 +256,6 @@ class CoreMixin:
                     else f"{local_bits} · {server_bits}"
                 ),
             ]
-
-            # Status ordering
             order = list(ALL_STATUSES)
             status_bits = [
                 f"{st} {status_counts.get(st, 0)}"
@@ -293,13 +266,10 @@ class CoreMixin:
                 lines.append(f"Status: {', '.join(status_bits)}")
             if top_cats:
                 lines.append(f"Top categories: {', '.join(top_cats)}")
-
             label.setText("<br>".join(lines))
             return
-
         scores = [int(getattr(x, "score", 0) or 0) for x in filtered]
         avg = sum(scores) / len(scores)
-
         status_counts = Counter(
             (getattr(x, "status", None) or DEFAULT_STATUS) for x in filtered
         )
@@ -310,21 +280,18 @@ class CoreMixin:
         for st, n in status_counts.most_common():
             if st not in order:
                 status_bits.append(f"{st} {n}")
-
         cat_counts = Counter(
             (getattr(x, "category", None) or "(none)") for x in filtered
         )
         top_cats = [
             f"{c} {n}" for c, n in cat_counts.most_common(3) if c and c != "(none)"
         ]
-
         lines = [
             f"Showing {len(filtered)}/{full_count} · score min {min(scores)} · max {max(scores)} · avg {avg:.1f}",
             f"Status: {', '.join(status_bits) if status_bits else '(none)'}",
         ]
         if top_cats:
             lines.append(f"Top categories: {', '.join(top_cats)}")
-
         label.setText("<br>".join(lines))
 
     def _clear_table_selection(self, table: QTableWidget) -> None:
@@ -342,7 +309,6 @@ class CoreMixin:
 
     def _active_scored_tab_context(self):
         """Return context for the currently active scored-entity tab.
-
         Returns:
             (tab_widget, table_widget, editor_card, commit_fn, clear_selection_fn)
             or None if the active tab is not a scored-entity tab.
@@ -350,7 +316,6 @@ class CoreMixin:
         if not hasattr(self, "tabs"):
             return None
         current = self.tabs.currentWidget()
-
         if current is getattr(self, "risks_tab", None):
             return (
                 current,
@@ -359,7 +324,6 @@ class CoreMixin:
                 lambda: self._commit_editor_changes(refresh=True),
                 lambda: self._clear_table_selection(self.risks_table),
             )
-
         if current is getattr(self, "opps_tab", None):
             editor = getattr(self, "_opp_editor_card", None)
             if editor is None and hasattr(self, "opps_tab"):
@@ -371,30 +335,24 @@ class CoreMixin:
                 lambda: self._commit_opp_editor_changes(refresh=True),
                 lambda: self._clear_table_selection(self.opps_table),
             )
-
         return None
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        """Handle events before the default Qt processing path."""
         if event.type() == QEvent.MouseButtonPress:
             ctx = self._active_scored_tab_context()
             if ctx:
                 tab_w, table_w, editor_w, commit_fn, clear_fn = ctx
-
                 try:
                     gp = event.globalPosition().toPoint()
                 except Exception:
                     gp = event.globalPos()
-
                 w = QApplication.widgetAt(gp)
-
                 inside_table = self._is_inside(table_w, w)
                 inside_editor = self._is_inside(editor_w, w)
                 inside_tab = self._is_inside(tab_w, w)
-
                 if (not inside_table) and (not inside_editor):
                     commit_fn()
-                    # Only clear the selection if the click happened outside the active tab.
-                    # Clicking filters or other in-tab controls should not de-select the current row.
                     if not inside_tab:
                         clear_fn()
         return super().eventFilter(obj, event)
@@ -418,14 +376,11 @@ class CoreMixin:
         border_px = 2
         w = hh.length() + border_px
         h = hh.height() + vh.length() + border_px
-
         if h > max_height:
             h = max_height
             table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            # w += table.verticalScrollBar().sizeHint().width()
         else:
             table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         table.setFixedHeight(h)
         table.setMinimumWidth(w)

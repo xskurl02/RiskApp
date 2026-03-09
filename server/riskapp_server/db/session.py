@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -43,10 +44,13 @@ from riskapp_server.core.config import (
 
 
 def utcnow() -> datetime:
+    """Handle utcnow."""
     return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Base(DeclarativeBase):
+    """Represent Base."""
+
     id: Mapped[uuid.UUID] = mapped_column(
         SAUuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
@@ -80,6 +84,7 @@ if "postgresql" in DATABASE_URL and DB_STATEMENT_TIMEOUT_MS:
     def _set_statement_timeout(dbapi_conn, _):
         # Apply per-connection to guard against pathological slow queries.
         # (Milliseconds; 0 disables.)
+        """Internal helper for set statement timeout."""
         cur = dbapi_conn.cursor()
         cur.execute("SET statement_timeout = %s", (int(DB_STATEMENT_TIMEOUT_MS),))
         cur.close()
@@ -92,6 +97,7 @@ SessionLocal = sessionmaker(
 
 
 def get_db():
+    """Return db."""
     db = SessionLocal()
     try:
         yield db
@@ -102,11 +108,14 @@ def get_db():
 def init_db() -> None:
     # Dev convenience: auto-create tables when migrations are not used.
     # In production, use migrations (e.g., Alembic) and set AUTO_CREATE_SCHEMA=0.
+    """Handle init db."""
     if AUTO_CREATE_SCHEMA:
         Base.metadata.create_all(bind=engine)
 
 
 class Role(StrEnum):
+    """Represent Role."""
+
     admin = "admin"
     manager = "manager"
     member = "member"
@@ -114,6 +123,8 @@ class Role(StrEnum):
 
 
 class SyncMixin:
+    """Represent Sync Mixin."""
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, nullable=False
     )
@@ -126,6 +137,7 @@ class SyncMixin:
     )
 
     def soft_delete(self, now: datetime) -> None:
+        """Perform soft delete."""
         self.is_deleted = True
         self.updated_at = now
         self.version = int(self.version) + 1
@@ -134,6 +146,8 @@ class SyncMixin:
 
 
 class RiskStatus(StrEnum):
+    """Represent Risk Status."""
+
     concept = "concept"
     active = "active"
     closed = "closed"
@@ -142,6 +156,8 @@ class RiskStatus(StrEnum):
 
 
 class SyncReceipt(Base):
+    """Represent Sync Receipt."""
+
     __tablename__ = "sync_receipts"
     # This table uses change_id as its identifier; don't inherit Base.id.
     id = None
@@ -176,6 +192,8 @@ class SyncReceipt(Base):
 
 
 class AuditLog(Base):
+    """Represent Audit Log."""
+
     __tablename__ = "audit_log"
     __table_args__ = (Index("ix_audit_log_project_ts", "project_id", "ts"),)
 
@@ -204,6 +222,8 @@ class AuditLog(Base):
 
 
 class User(Base):
+    """Represent User."""
+
     __tablename__ = "users"
 
     email: Mapped[str] = mapped_column(
@@ -264,6 +284,8 @@ class PasswordResetToken(Base):
 
 
 class Project(Base):
+    """Represent Project."""
+
     __tablename__ = "projects"
 
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
@@ -277,6 +299,8 @@ class Project(Base):
 
 
 class ProjectMember(Base):
+    """Represent Project Member."""
+
     __tablename__ = "project_members"
     __table_args__ = (
         UniqueConstraint("project_id", "user_id", name="uq_project_user"),
@@ -295,6 +319,8 @@ class ProjectMember(Base):
 
 
 class ItemBaseMixin(SyncMixin):
+    """Represent Item Base Mixin."""
+
     project_id: Mapped[uuid.UUID] = mapped_column(
         SAUuid(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True
     )
@@ -332,6 +358,7 @@ class ItemBaseMixin(SyncMixin):
     )
 
     def change_status(self, new_status: str, now: datetime) -> None:
+        """Handle change status."""
         if self.status != new_status:
             self.status = new_status
             self.status_changed_at = now
@@ -340,6 +367,8 @@ class ItemBaseMixin(SyncMixin):
 
 
 class Item(Base, ItemBaseMixin):
+    """Represent Item."""
+
     __tablename__ = "items"
     __table_args__ = (
         UniqueConstraint("project_id", "code", name="uq_items_project_code"),
@@ -359,6 +388,7 @@ class Item(Base, ItemBaseMixin):
 
 
 def _validate_scale_1_5(field: str, value: int | None) -> None:
+    """Internal helper for validate scale 1 5."""
     if value is None:
         raise ValueError(f"{field} must not be null")
     if not (1 <= int(value) <= 5):
@@ -366,19 +396,13 @@ def _validate_scale_1_5(field: str, value: int | None) -> None:
 
 
 def _score(probability: int, impact: int) -> int:
+    """Internal helper for score."""
     return int(probability) * int(impact)
 
 
-@event.listens_for(Item, "before_insert")
-@event.listens_for(Item, "before_update")
-def _items_compute_score(mapper, connection, target: Item) -> None:  # noqa: ARG001
-    # Keep DB state consistent with the spec: risk/opportunity score = P × I.
-    _validate_scale_1_5("probability", getattr(target, "probability", None))
-    _validate_scale_1_5("impact", getattr(target, "impact", None))
-    target.score = _score(target.probability, target.impact)
-
-
 class AssessmentMixin(SyncMixin):
+    """Represent Assessment Mixin."""
+
     assessor_user_id: Mapped[uuid.UUID] = mapped_column(
         SAUuid(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
     )
@@ -389,6 +413,8 @@ class AssessmentMixin(SyncMixin):
 
 
 class Assessment(Base, AssessmentMixin):
+    """Represent Assessment."""
+
     __tablename__ = "assessments"
     __table_args__ = (
         UniqueConstraint("item_id", "assessor_user_id", name="uq_item_assessor"),
@@ -401,36 +427,46 @@ class Assessment(Base, AssessmentMixin):
 
     @property
     def risk_id(self) -> uuid.UUID:  # client/API compatibility
+        """Handle risk id."""
         return self.item_id
 
     @property
     def opportunity_id(self) -> uuid.UUID:  # client/API compatibility
+        """Handle opportunity id."""
         return self.item_id
 
 
+@event.listens_for(Item, "before_insert")
+@event.listens_for(Item, "before_update")
 @event.listens_for(Assessment, "before_insert")
 @event.listens_for(Assessment, "before_update")
-def _assessments_compute_score(
-    mapper, connection, target: Assessment
-) -> None:  # noqa: ARG001
+def _compute_score(mapper, connection, target: Any) -> None:  # noqa: ARG001
+    # Keep DB state consistent with the spec: risk/opportunity score = P × I.
+    """Internal helper for compute score."""
     _validate_scale_1_5("probability", getattr(target, "probability", None))
     _validate_scale_1_5("impact", getattr(target, "impact", None))
     target.score = _score(target.probability, target.impact)
 
 
 class ActionKind(StrEnum):
+    """Represent Action Kind."""
+
     mitigation = "mitigation"
     contingency = "contingency"
     exploit = "exploit"
 
 
 class ActionStatus(StrEnum):
+    """Represent Action Status."""
+
     open = "open"
     doing = "doing"
     done = "done"
 
 
 class Action(Base, SyncMixin):
+    """Represent Action."""
+
     __tablename__ = "actions"
     __table_args__ = (
         Index(
@@ -465,6 +501,8 @@ class Action(Base, SyncMixin):
 
 
 class ScoreSnapshot(Base):
+    """Represent Score Snapshot."""
+
     __tablename__ = "score_snapshots"
     __table_args__ = (
         Index(

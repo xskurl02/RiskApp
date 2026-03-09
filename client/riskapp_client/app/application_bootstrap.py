@@ -27,38 +27,29 @@ logger = logging.getLogger(__name__)
 
 def build_main_window(config: AppConfig) -> MainWindow:
     """Build and return the application's main window."""
-
-    # Ensure the directory exists so LocalStore can create/open the DB file.
-    # This keeps first-run UX smooth on fresh machines.
     try:
         Path(config.local_db_path).expanduser().parent.mkdir(
             parents=True, exist_ok=True
         )
     except OSError as exc:
-        # Surface a clear error instead of failing later with a less obvious stack trace.
         QMessageBox.critical(
             None,
             "Local storage error",
             f"Cannot create local DB directory for:\n{config.local_db_path}\n\n{exc}",
         )
         raise
-
     store = LocalStore(str(config.local_db_path))
-
     remote = None
     base_url = config.base_url
     email = config.email
     password = config.password
-
     if not email or not password:
         dlg = LoginDialog(default_url=base_url)
         if dlg.exec() != QDialog.Accepted:
             # Allow pure offline start if DB already has data.
             backend = OfflineFirstBackend(store, remote=None)
             return MainWindow(backend)
-
         base_url, email, password = dlg.values()
-
     try:
         remote = ApiBackend(
             base_url=base_url,
@@ -75,6 +66,5 @@ def build_main_window(config: AppConfig) -> MainWindow:
             f"{exc}\n\nStarting offline (local cache + outbox).",
         )
         remote = None
-
     backend = OfflineFirstBackend(store, remote=remote)
     return MainWindow(backend)

@@ -30,12 +30,16 @@ NonEmptyStr = Annotated[str, Field(min_length=1)]
 
 
 class RegisterIn(BaseModel):
+    """Represent Register In."""
+
     email: EmailStr
     # Password complexity is enforced server-side (core.password_policy).
     password: str = Field(min_length=1, max_length=128)
 
 
 class TokenOut(BaseModel):
+    """Represent Token Out."""
+
     user_id: uuid.UUID | None = None
     access_token: str
     token_type: str = "bearer"
@@ -44,28 +48,40 @@ class TokenOut(BaseModel):
 
 
 class RefreshIn(BaseModel):
+    """Represent Refresh In."""
+
     refresh_token: str
 
 
 class ChangePasswordIn(BaseModel):
+    """Represent Change Password In."""
+
     old_password: str
     new_password: str
 
 
 class PasswordResetRequestIn(BaseModel):
+    """Represent Password Reset Request In."""
+
     email: EmailStr
 
 
 class PasswordResetConfirmIn(BaseModel):
+    """Represent Password Reset Confirm In."""
+
     token: str
     new_password: str
 
 
 class AdminSetPasswordIn(BaseModel):
+    """Represent Admin Set Password In."""
+
     new_password: str
 
 
 class UserOut(ORMModel):
+    """Represent User Out."""
+
     id: uuid.UUID
     email: EmailStr
     is_active: bool
@@ -73,16 +89,22 @@ class UserOut(ORMModel):
 
 
 class ProjectCreate(BaseModel):
+    """Represent Project Create."""
+
     name: NonEmptyStr
     description: str | None = None
 
 
 class AddMemberIn(BaseModel):
+    """Represent Add Member In."""
+
     user_email: EmailStr
     role: Role
 
 
 class MemberOut(ORMModel):
+    """Represent Member Out."""
+
     user_id: uuid.UUID
     email: EmailStr
     role: Role
@@ -90,6 +112,8 @@ class MemberOut(ORMModel):
 
 
 class ProjectOut(ORMModel):
+    """Represent Project Out."""
+
     id: uuid.UUID
     name: str
     description: str | None
@@ -99,6 +123,7 @@ class ProjectOut(ORMModel):
 
 class ItemShared(BaseModel):
     # Impact dimensions (cost/time/scope/quality) as requested in the Czech spec.
+    """Represent Item Shared."""
     impact_cost: ImpactDim | None = None
     impact_time: ImpactDim | None = None
     impact_scope: ImpactDim | None = None
@@ -124,6 +149,8 @@ class ItemShared(BaseModel):
 
 
 class ItemCreate(ItemShared):
+    """Represent Item Create."""
+
     type: Literal["risk", "opportunity"]
     title: NonEmptyStr
     probability: Probability
@@ -131,14 +158,20 @@ class ItemCreate(ItemShared):
 
 
 class RiskCreate(ItemCreate):
+    """Represent Risk Create."""
+
     type: Literal["risk"] = "risk"
 
 
 class OpportunityCreate(ItemCreate):
+    """Represent Opportunity Create."""
+
     type: Literal["opportunity"] = "opportunity"
 
 
 class ItemUpdate(ItemShared):
+    """Represent Item Update."""
+
     base_version: int | None = None
     title: str | None = None
     probability: Probability | None = None
@@ -146,14 +179,20 @@ class ItemUpdate(ItemShared):
 
 
 class RiskUpdate(ItemUpdate):
+    """Represent Risk Update."""
+
     pass
 
 
 class OpportunityUpdate(ItemUpdate):
+    """Represent Opportunity Update."""
+
     pass
 
 
 class ItemOut(ItemShared, ORMModel):
+    """Represent Item Out."""
+
     id: uuid.UUID
     type: Literal["risk", "opportunity"]
     project_id: uuid.UUID
@@ -170,14 +209,20 @@ class ItemOut(ItemShared, ORMModel):
 
 
 class RiskOut(ItemOut):
+    """Represent Risk Out."""
+
     type: Literal["risk"]
 
 
 class OpportunityOut(ItemOut):
+    """Represent Opportunity Out."""
+
     type: Literal["opportunity"]
 
 
 class ScoreReportOut(BaseModel):
+    """Represent Score Report Out."""
+
     total: int
     project_total: int | None = None
     min_score: int | None = None
@@ -190,6 +235,8 @@ class ScoreReportOut(BaseModel):
 
 
 class AssessmentIn(BaseModel):
+    """Represent Assessment In."""
+
     base_version: int | None = None
     probability: Probability
     impact: Impact
@@ -197,6 +244,8 @@ class AssessmentIn(BaseModel):
 
 
 class AssessmentOut(ORMModel):
+    """Represent Assessment Out."""
+
     id: uuid.UUID
     item_id: uuid.UUID
     assessor_user_id: uuid.UUID
@@ -211,6 +260,8 @@ class AssessmentOut(ORMModel):
 
 
 class RiskAssessmentOut(ORMModel):
+    """Represent Risk Assessment Out."""
+
     id: uuid.UUID
     risk_id: uuid.UUID
     assessor_user_id: uuid.UUID
@@ -225,6 +276,8 @@ class RiskAssessmentOut(ORMModel):
 
 
 class OpportunityAssessmentOut(ORMModel):
+    """Represent Opportunity Assessment Out."""
+
     id: uuid.UUID
     opportunity_id: uuid.UUID
     assessor_user_id: uuid.UUID
@@ -239,6 +292,8 @@ class OpportunityAssessmentOut(ORMModel):
 
 
 class MatrixResponse(BaseModel):
+    """Represent Matrix Response."""
+
     kind: str
     probability_axis: list[int]
     impact_axis: list[int]
@@ -247,6 +302,8 @@ class MatrixResponse(BaseModel):
 
 
 class ActionCreate(BaseModel):
+    """Represent Action Create."""
+
     risk_id: uuid.UUID | None = None
     opportunity_id: uuid.UUID | None = None
     kind: ActionKind
@@ -258,12 +315,15 @@ class ActionCreate(BaseModel):
     @model_validator(mode="after")
     def _validate_target(self):
         # Avoid ambiguous linking; if you support global/project-level actions, allowing neither is OK.
+        """Internal helper for validate target."""
         if self.risk_id and self.opportunity_id:
             raise ValueError("Provide only one of risk_id or opportunity_id.")
         return self
 
 
 class ActionUpdate(BaseModel):
+    """Represent Action Update."""
+
     risk_id: uuid.UUID | None = None
     opportunity_id: uuid.UUID | None = None
     kind: ActionKind | None = None
@@ -274,12 +334,15 @@ class ActionUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_target(self):
+        """Internal helper for validate target."""
         if self.risk_id and self.opportunity_id:
             raise ValueError("Provide only one of risk_id or opportunity_id.")
         return self
 
 
 class ActionOut(ORMModel):
+    """Represent Action Out."""
+
     id: uuid.UUID
     project_id: uuid.UUID
     risk_id: uuid.UUID | None = None
@@ -295,6 +358,8 @@ class ActionOut(ORMModel):
 
 
 class SnapshotCreateOut(BaseModel):
+    """Represent Snapshot Create Out."""
+
     batch_id: uuid.UUID
     captured_at: datetime
     risks: int = 0
@@ -302,6 +367,8 @@ class SnapshotCreateOut(BaseModel):
 
 
 class SnapshotLatestOut(BaseModel):
+    """Represent Snapshot Latest Out."""
+
     batch_id: uuid.UUID
     captured_at: datetime
     kind: str
@@ -309,6 +376,8 @@ class SnapshotLatestOut(BaseModel):
 
 
 class TopItem(BaseModel):
+    """Represent Top Item."""
+
     item_id: uuid.UUID
     title: str
     probability: int
@@ -317,12 +386,16 @@ class TopItem(BaseModel):
 
 
 class TopBatch(BaseModel):
+    """Represent Top Batch."""
+
     batch_id: uuid.UUID
     captured_at: datetime
     top: list[TopItem]
 
 
 class SyncPullRequest(BaseModel):
+    """Represent Sync Pull Request."""
+
     project_id: uuid.UUID
     since: datetime
     # Optional pagination support (per entity). If omitted, server uses legacy
@@ -332,6 +405,8 @@ class SyncPullRequest(BaseModel):
 
 
 class SyncPullResponse(BaseModel):
+    """Represent Sync Pull Response."""
+
     server_time: datetime
     risks: list[RiskOut]
     opportunities: list[OpportunityOut]
@@ -344,6 +419,8 @@ class SyncPullResponse(BaseModel):
 
 
 class SyncChange(BaseModel):
+    """Represent Sync Change."""
+
     change_id: uuid.UUID
     entity: str
     op: str
@@ -352,11 +429,15 @@ class SyncChange(BaseModel):
 
 
 class SyncPushRequest(BaseModel):
+    """Represent Sync Push Request."""
+
     project_id: uuid.UUID
     changes: list[SyncChange]
 
 
 class SyncPushResponse(BaseModel):
+    """Represent Sync Push Response."""
+
     accepted: int
     duplicates: int = 0
     duplicate_change_ids: list[str] = Field(default_factory=list)
@@ -369,6 +450,8 @@ class SyncPushResponse(BaseModel):
 
 
 class SyncItemRecord(ItemShared):
+    """Represent Sync Item Record."""
+
     id: uuid.UUID
     title: str | None = None
     probability: Probability | None = None
@@ -377,6 +460,8 @@ class SyncItemRecord(ItemShared):
 
 
 class SyncActionRecord(BaseModel):
+    """Represent Sync Action Record."""
+
     id: uuid.UUID
     item_id: uuid.UUID | None = None
     risk_id: uuid.UUID | None = None
@@ -390,6 +475,8 @@ class SyncActionRecord(BaseModel):
 
 
 class SyncAssessmentRecord(BaseModel):
+    """Represent Sync Assessment Record."""
+
     id: uuid.UUID
     item_id: uuid.UUID | None = None
     risk_id: uuid.UUID | None = None

@@ -54,6 +54,8 @@ OpportunityFilterCriteria = ScoredFilterCriteria
 
 
 class _Scored(Protocol):
+    """Represent Scored."""
+
     title: str | None
     code: str | None
     category: str | None
@@ -129,10 +131,12 @@ def filter_scored(
 
 
 def filter_risks(risks: list[Risk], criteria: RiskFilterCriteria) -> list[Risk]:
+    """Filter risks."""
     return filter_scored(risks, criteria)
 
 
 def filter_opportunities(
     opps: list[Opportunity], criteria: OpportunityFilterCriteria
 ) -> list[Opportunity]:
+    """Filter opportunities."""
     return filter_scored(opps, criteria)

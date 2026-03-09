@@ -1,3 +1,5 @@
+"""API router for auth routes."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -34,6 +36,7 @@ _login_limiter = InMemorySlidingWindowLimiter(
 
 @router.post("/register", status_code=201, response_model=TokenOut)
 def register(payload: RegisterIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Handle register."""
     email = str(payload.email).lower()
     if db.execute(select(User.id).where(User.email == email)).first():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -65,6 +68,7 @@ def login(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     # Basic rate limit (per-IP+email). Edge rate limiting is still recommended.
+    """Handle login."""
     client_ip = (request.client.host if request.client else "") or "unknown"
     email = form.username.lower()
 
@@ -99,6 +103,7 @@ def login(
 
 @router.post("/refresh", response_model=TokenOut)
 def refresh(payload: RefreshIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Refresh item."""
     new_refresh, user_id = rotate_refresh_token(db, payload.refresh_token)
     access = create_access_token(str(user_id))
     return {

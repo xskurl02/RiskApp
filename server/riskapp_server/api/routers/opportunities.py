@@ -1,3 +1,5 @@
+"""API router for opportunities."""
+
 from __future__ import annotations
 
 from riskapp_server.api.routers.crud_factory import create_crud_router

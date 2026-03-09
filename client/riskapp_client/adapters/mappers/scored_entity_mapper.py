@@ -69,7 +69,6 @@ def normalize_scored_payload_inplace(
     """
     if not payload:
         return
-
     norm_optional_text_fields(payload, SCORED_ENTITY_TEXT_META_KEYS)
 
     def _coerce_required_int(value: Any, *, default: int, field: str) -> int:
@@ -78,16 +77,13 @@ def normalize_scored_payload_inplace(
         In strict mode we raise only for *non-empty* values that cannot be
         parsed. Empty strings / None fall back to a sensible default.
         """
-
         if value is None:
             return default
         if isinstance(value, bool):
             return default
-
         s = str(value).strip()
         if not s:
             return default
-
         try:
             return int(s)
         except ValueError:
@@ -107,7 +103,6 @@ def normalize_scored_payload_inplace(
             default=1,
             field="impact",
         )
-
     for k in IMPACT_DIMENSIONS:
         if k in payload:
             payload[k] = _opt_int(payload.get(k))
@@ -119,15 +114,12 @@ def scored_entity_from_mapping(
     """Create a Risk/Opportunity model from a mapping (API JSON, sqlite3.Row, dict)."""
     if not data:
         raise ValueError("empty scored entity mapping")
-
     # Convert sqlite3.Row to a standard dict so .get() works safely
     data = dict(data)
-
     eid = str(data.get("id") or "").strip()
     pid = str(data.get("project_id") or "").strip()
     if not eid or not pid:
         raise KeyError("scored entity mapping must contain 'id' and 'project_id'")
-
     out: dict[str, Any] = {
         "id": eid,
         "project_id": pid,
@@ -138,18 +130,13 @@ def scored_entity_from_mapping(
         "is_deleted": bool(data.get("is_deleted", False)),
         "updated_at": str(data.get("updated_at") or ""),
     }
-
     for k in SCORED_ENTITY_META_KEYS:
         out[k] = data.get(k)
-
     for k in IMPACT_DIMENSIONS:
         out[k] = _opt_int(out.get(k))
-
     out["owner_user_id"] = _opt_str(out.get("owner_user_id"))
-
     for k in DATE_FIELDS:
         out[k] = _opt_str(out.get(k))
-
     norm_optional_text_fields(out, SCORED_ENTITY_TEXT_META_KEYS)
     return model_cls(**out)
 
@@ -171,18 +158,14 @@ def scored_entity_to_mapping(
     }
     if include_project_id:
         out["project_id"] = str(entity.project_id)
-
     for k in SCORED_ENTITY_META_KEYS:
         out[k] = getattr(entity, k, None)
-
     if include_sync:
         out["version"] = int(getattr(entity, "version", 0) or 0)
         out["is_deleted"] = bool(getattr(entity, "is_deleted", False))
         out["updated_at"] = str(getattr(entity, "updated_at", "") or "")
-
     if include_score:
         out["score"] = _opt_int(getattr(entity, "score", None))
-
     norm_optional_text_fields(out, SCORED_ENTITY_TEXT_META_KEYS)
     if not include_nones:
         out = {k: v for k, v in out.items() if v is not None}

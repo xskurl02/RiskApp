@@ -7,7 +7,6 @@ Normalizing optional text fields in one place prevents drift between:
 - SQLite rows
 - API JSON
 
-This module is intentionally tiny and dependency-free.
 """
 
 from __future__ import annotations
@@ -26,14 +25,11 @@ def norm_optional_text_fields(
     """
     if not payload:
         return
-
     for key in keys:
         if key not in payload:
             continue
-
         value = payload.get(key)
         if value is None:
             continue
-
         normalized = str(value).strip()
         payload[key] = normalized if normalized else None

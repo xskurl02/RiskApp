@@ -1,3 +1,5 @@
+"""API router for matrix."""
+
 from __future__ import annotations
 
 import uuid
@@ -21,6 +23,7 @@ def matrix(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> MatrixResponse:
+    """Handle matrix."""
     ensure_member(db, project_id, user.id)
 
     k = (kind or "").strip().lower()
@@ -33,12 +36,14 @@ def matrix(
     i_axis = list(range(1, 6))
 
     def blank() -> list[list[int]]:
+        """Handle blank."""
         return [[0 for _ in i_axis] for __ in p_axis]
 
     risks = blank() if k in {"risk", "both"} else None
     opps = blank() if k in {"opportunity", "both"} else None
 
     def fill(item_type: str, out):
+        """Handle fill."""
         if out is None:
             return
         for p, i, c in db.execute(

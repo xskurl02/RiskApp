@@ -7,6 +7,7 @@ import os
 
 def main() -> int:
     # Lazy import so this file stays importable even if uvicorn isn't installed.
+    """Handle main."""
     import uvicorn  # type: ignore
 
     host = os.getenv("HOST", "127.0.0.1")

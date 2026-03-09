@@ -48,12 +48,14 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 
 def hash_pw(password: str) -> str:
+    """Return whether h pw is present."""
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PBKDF2_ITERS)
     return f"pbkdf2_sha256${PBKDF2_ITERS}${base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
 
 
 def verify_pw(password: str, stored_hash: str) -> bool:
+    """Handle verify pw."""
     try:
         algo, iters_s, salt_b64, hash_b64 = stored_hash.split("$", 3)
         if algo != "pbkdf2_sha256":
@@ -163,6 +165,7 @@ def get_current_user(
     db: Session = Depends(get_db),
     token: str = Depends(oauth2_scheme),
 ) -> User:
+    """Return current user."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         sub = payload.get("sub")

@@ -1,8 +1,13 @@
 """Risks tab widget."""
+
 from __future__ import annotations
+
 from collections.abc import Callable
+
 from PySide6.QtWidgets import QWidget
+
 from riskapp_client.ui_v2.tabs.scored_entities_base_tab import ScoredEntitiesTab
+
 
 class RisksTab(ScoredEntitiesTab):
     """Risks list + editor tab."""
@@ -32,7 +37,5 @@ class RisksTab(ScoredEntitiesTab):
             on_fit_table_card=on_fit_table_card,
             parent=parent,
         )
-
-        # Explicitly map the cards so layout_mixin can find them!
         self.table_card = self.ui.table_card
         self.editor_card = self.ui.editor_card

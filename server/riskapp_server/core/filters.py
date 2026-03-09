@@ -22,6 +22,8 @@ from riskapp_server.db.session import RiskStatus
 
 
 class ItemFilterParams:
+    """Represent Item Filter Params."""
+
     def __init__(
         self,
         search: str | None = None,
@@ -42,6 +44,7 @@ class ItemFilterParams:
         ),
         offset: int = Query(default=0, ge=0, description="Počet preskočených záznamov"),
     ):
+        """Internal helper for init."""
         self.search = search
         self.item_type = item_type
         self.min_score = min_score
@@ -63,12 +66,14 @@ class ItemFilterParams:
 
 
 def csv_list(value: str | None) -> list[str]:
+    """Handle csv list."""
     return [v.strip() for v in str(value or "").split(",") if v.strip()]
 
 
 def apply_date_range(
     stmt: Select, field, *, from_date: date | None, to_date: date | None
 ) -> Select:
+    """Apply date range."""
     if from_date is not None:
         stmt = stmt.where(field >= datetime.combine(from_date, datetime.min.time()))
     if to_date is not None:
@@ -81,6 +86,7 @@ def apply_date_range(
 def normalize_score_range(
     min_score: int | None, max_score: int | None
 ) -> tuple[int | None, int | None]:
+    """Handle normalize score range."""
     return (
         (max_score, min_score)
         if min_score is not None and max_score is not None and min_score > max_score
@@ -103,6 +109,7 @@ def apply_item_filters(
     from_date: date | None,
     to_date: date | None,
 ) -> Select:
+    """Apply item filters."""
     status_values = [s.lower() for s in csv_list(status)]
     include_deleted = RiskStatus.deleted.value in status_values
     non_deleted = [s for s in status_values if s != RiskStatus.deleted.value]

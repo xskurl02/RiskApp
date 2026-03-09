@@ -1,3 +1,5 @@
+"""UI mixin module for scored entity mixin."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -12,7 +14,7 @@ from riskapp_client.utils.text_normalization_helpers import norm_optional_text_f
 
 
 class ScoredEntityMixin:
-    """Jednotný mixin pro Rizika a Příležitosti. Odbourává duplicitní kód."""
+    """A unified mixin for Risks and Opportunities"""
 
     def _export_entity_csv(self, filename: str, cache: dict, export_fn) -> None:
         if not self.current_project_id:
@@ -41,10 +43,8 @@ class ScoredEntityMixin:
         full = self._call_backend("Backend error", list_backend_fn, pid)
         if full is None:
             return None
-
         mn, mx = score_bounds(filters_dict["min_score"], filters_dict["max_score"])
         dt_from, dt_to = date_bounds(filters_dict["from_date"], filters_dict["to_date"])
-
         criteria = criteria_cls(
             search=(filters_dict["search"].text() or ""),
             min_score=mn,
@@ -57,18 +57,14 @@ class ScoredEntityMixin:
             identified_to=dt_to,
         )
         filtered = filter_fn(full, criteria)
-
         server_report = None
         if report_backend_fn is not None:
             try:
-                # Convert UI filters into server query params.
                 status = (filters_dict["status"].currentText() or "(any)").strip()
                 status_q = None if status == "(any)" else status
-
                 owner_id, owner_unassigned = self._owner_filter_value(
                     filters_dict["owner"]
                 )
-
                 server_report = report_backend_fn(
                     pid,
                     search=(filters_dict["search"].text() or "") or None,
@@ -83,7 +79,6 @@ class ScoredEntityMixin:
                 )
             except Exception:
                 server_report = None
-
         self._update_scored_filter_report(
             report_widget, len(full), list(filtered), server_report=server_report
         )
@@ -128,20 +123,16 @@ class ScoredEntityMixin:
         clicked_id = str(t_it.data(Qt.UserRole))
         if not clicked_id:
             return None
-
         if editor_dirty and current_id and current_id != clicked_id:
             commit_fn(refresh=True, select_id=clicked_id)
             row = table.currentRow()
             col = max(0, table.currentColumn())
-
         table.setCurrentCell(row, col)
         if not self.current_project_id:
             return None
-
         ent = cache.get(clicked_id)
         if not ent:
             return None
-
         form.set_values(**form_values_for_entity(ent))
         label_widget.setText(f"{label_prefix} (editing: {ent.title})")
         return ent.id
@@ -157,7 +148,6 @@ class ScoredEntityMixin:
         payload = form.get_payload()
         if not payload.get("title"):
             return False
-
         st = str(payload.get("status") or "").strip().lower()
         if st == "deleted" and hasattr(self, "_can_mark_deleted"):
             try:
@@ -182,34 +172,23 @@ class ScoredEntityMixin:
         return True
 
     def _delete_entity(
-        self, 
-        current_id: str | None, 
-        delete_backend_fn, 
-        refresh_fn, 
-        start_new_fn
+        self, current_id: str | None, delete_backend_fn, refresh_fn, start_new_fn
     ) -> None:
         """Safely prompt the user and delete the entity."""
         if not current_id:
             return  # Nothing to delete
-            
         pid = self.current_project_id
         if not pid:
             return
-
-        # 1. Ask for confirmation!
         reply = QMessageBox.question(
             self,
             "Confirm Deletion",
             "Are you sure you want to completely delete this item? This cannot be undone.",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
-
         if reply == QMessageBox.Yes:
-            # 2. Call the backend to delete
             self._call_backend("Backend error", delete_backend_fn, pid, current_id)
-            
-            # 3. Clear the form and refresh the table
             start_new_fn()
             refresh_fn()
 
@@ -229,12 +208,10 @@ class ScoredEntityMixin:
         if not pid:
             QMessageBox.warning(self, "No project", "Select a project first.")
             return None
-
         data = dict(payload or {})
         title = (data.pop("title", "") or "").strip()
         p = int(data.pop("probability", 3) or 3)
         i = int(data.pop("impact", 3) or 3)
-
         norm_optional_text_fields(
             data,
             [
@@ -253,7 +230,6 @@ class ScoredEntityMixin:
                 "occurred_at",
             ],
         )
-
         st = str(data.get("status") or "").strip().lower()
         if st == "deleted" and hasattr(self, "_can_mark_deleted"):
             try:
@@ -266,7 +242,6 @@ class ScoredEntityMixin:
                     return None
             except Exception:
                 return None
-
         if current_id:
             if (
                 self._call_backend(
@@ -320,7 +295,6 @@ class ScoredEntityMixin:
                 occurred_at=data.get("occurred_at"),
             )
             label_widget.setText(f"{label_prefix} (editing: {title})")
-
         if refresh_fn:
             refresh_fn(select_id=current_id)
         for ref in extra_refreshes:

@@ -1,3 +1,5 @@
+"""Test module for test api smoke."""
+
 from __future__ import annotations
 
 import importlib
@@ -72,6 +74,7 @@ def _create_isolated_app(db_url: str):
 
 
 def test_register_create_project_create_items_and_matrix(tmp_path) -> None:
+    """Test that register create project create items and matrix."""
     db_file = tmp_path / "api_smoke.db"
     app = _create_isolated_app(f"sqlite+pysqlite:///{db_file}")
 

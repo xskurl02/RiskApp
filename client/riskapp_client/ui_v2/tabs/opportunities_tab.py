@@ -1,8 +1,13 @@
 """Opportunities tab widget."""
+
 from __future__ import annotations
+
 from collections.abc import Callable
+
 from PySide6.QtWidgets import QWidget
+
 from riskapp_client.ui_v2.tabs.scored_entities_base_tab import ScoredEntitiesTab
+
 
 class OpportunitiesTab(ScoredEntitiesTab):
     """Opportunities list + editor tab."""
@@ -31,12 +36,8 @@ class OpportunitiesTab(ScoredEntitiesTab):
             on_fit_table_card=None,
             parent=parent,
         )
-
-        # Explicitly map the cards so layout_mixin can find them!
         self.table_card = self.ui.table_card
         self.editor_card = self.ui.editor_card
-
-        # Back-compat filter widget names for the OpportunitiesMixin.
         self.opp_filter_search = self.filter_search
         self.opp_filter_min_score = self.filter_min_score
         self.opp_filter_max_score = self.filter_max_score

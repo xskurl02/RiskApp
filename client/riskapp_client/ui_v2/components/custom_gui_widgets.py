@@ -1,6 +1,13 @@
+"""Client module for custom gui widgets."""
+
 from __future__ import annotations
 
-from PySide6.QtCore import QRect, QSize, Qt, QDateTime  # pylint: disable=no-name-in-module
+from PySide6.QtCore import (  # pylint: disable=no-name-in-module
+    QDateTime,
+    QRect,
+    QSize,
+    Qt,
+)
 from PySide6.QtGui import QColor, QPen  # pylint: disable=no-name-in-module
 from PySide6.QtWidgets import (  # pylint: disable=no-name-in-module
     QAbstractItemView,
@@ -18,10 +25,9 @@ from riskapp_client.ui_v2.components.ui_dialog import Ui_Dialog
 from riskapp_client.ui_v2.components.ui_risk_form import Ui_Form as Ui_RiskForm
 
 
-# -------------------------
-# Minimal login dialog (only shown if env vars are missing)
-# -------------------------
 class LoginDialog(QDialog):
+    """Represent Login Dialog."""
+
     def __init__(
         self, *, default_url: str = "http://localhost:8000", parent=None
     ) -> None:
@@ -34,6 +40,7 @@ class LoginDialog(QDialog):
         self.ui.buttonBox.rejected.connect(self.reject)
 
     def values(self) -> tuple[str, str, str]:
+        """Handle values."""
         return (
             self.ui.url.text().strip(),
             self.ui.email.text().strip(),
@@ -41,9 +48,6 @@ class LoginDialog(QDialog):
         )
 
 
-# -------------------------
-# UI
-# -------------------------
 class ExcelSelectionDelegate(QStyledItemDelegate):
     """Grey selection for whole selected row, and a single 'active cell' border.
     Also renders a 'row number gutter' inside the Title column.
@@ -54,54 +58,45 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
     GUTTER_COL = 1
 
     def sizeHint(self, option, index):
+        """Handle size Hint."""
         s = super().sizeHint(option, index)
         if index.column() == self.GUTTER_COL:
             return QSize(s.width() + self.GUTTER_W + 10, s.height())
         return s
 
     def paint(self, painter, option, index):
+        """Paint item."""
         opt = QStyleOptionViewItem(option)
-
-        # background
-
         # --- DYNAMIC THEME COLORS ---
         base_color = opt.palette.base().color()
         text_color = opt.palette.text().color()
         highlight_bg = opt.palette.highlight().color()
-        
         grid_color = QColor(text_color)
         grid_color.setAlpha(50)
-        # ----------------------------
-
         if opt.state & QStyle.State_Selected:
             bg = highlight_bg
         elif opt.state & QStyle.State_MouseOver:
             if base_color.lightness() > 128:
-                bg = base_color.darker(105) 
+                bg = base_color.darker(105)
             else:
                 bg = base_color.lighter(130)
         else:
             bg = base_color
-
         painter.save()
         painter.fillRect(opt.rect, bg)
         painter.restore()
-
         if index.column() == self.GUTTER_COL:
             rect = opt.rect
             gutter = QRect(rect.left(), rect.top(), self.GUTTER_W, rect.height())
-
             # separator line between number and title
             painter.save()
             pen = QPen(grid_color, 1)
             pen.setCosmetic(True)
             pen.setCapStyle(Qt.FlatCap)
             painter.setPen(pen)
-
             x = rect.left() + self.GUTTER_W
             painter.drawLine(x, rect.top(), x, rect.bottom() - 1)
             painter.restore()
-
             # number (row index)
             num = str(index.row() + 1)
             painter.save()
@@ -111,12 +106,10 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
                 painter.setPen(text_color)
             painter.drawText(gutter.adjusted(0, 0, -1, 0), Qt.AlignCenter, num)
             painter.restore()
-
             # title text
             title = index.data() or ""
             pad = 8
             title_rect = rect.adjusted(self.GUTTER_W + pad, 0, -pad, 0)
-
             painter.save()
             if opt.state & QStyle.State_Selected:
                 painter.setPen(opt.palette.highlightedText().color())
@@ -134,16 +127,13 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
             # Bypass Qt's stubborn defaults and forcefully draw the text dead-center
             val = index.data()
             text = str(val) if val is not None else ""
-            
             painter.save()
             if opt.state & QStyle.State_Selected:
                 painter.setPen(opt.palette.highlightedText().color())
             else:
                 painter.setPen(text_color)
-                
             painter.drawText(opt.rect, Qt.AlignCenter, text)
             painter.restore()
-
         # active cell border
         if opt.state & QStyle.State_HasFocus:
             painter.save()
@@ -152,29 +142,24 @@ class ExcelSelectionDelegate(QStyledItemDelegate):
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(opt.rect.adjusted(1, 1, -1, -1))
             painter.restore()
-
         # excel-like internal gridlines
         painter.save()
         pen = QPen(grid_color, 1)
         pen.setCosmetic(True)
         pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)
-
         r = opt.rect
         model = index.model()
         last_col = model.columnCount(index.parent()) - 1
         last_row = model.rowCount(index.parent()) - 1
-
         if index.column() < last_col:
             x = r.right()
             y2 = r.bottom() if index.row() == last_row else (r.bottom() - 1)
             painter.drawLine(x, r.top(), x, y2)
-
         if index.row() < last_row:
             y = r.bottom()
             x2 = r.right() if index.column() == last_col else (r.right() - 1)
             painter.drawLine(r.left(), y, x2, y)
-
         painter.restore()
 
 
@@ -188,28 +173,25 @@ def setup_readonly_table(table: QTableWidget, *, excel_delegate: bool = False) -
     table.setSelectionBehavior(QAbstractItemView.SelectRows)
     table.setSelectionMode(QAbstractItemView.SingleSelection)
     table.setFocusPolicy(Qt.StrongFocus)
-    # 1. Turn OFF stretchLastSection so it doesn't override our equal stretch
     table.horizontalHeader().setStretchLastSection(False)
-    # 2. Force EVERY column to stretch equally to fill the space
     table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
     if excel_delegate:
         table.setItemDelegate(ExcelSelectionDelegate(table))
 
 
 class RiskForm(QWidget):
+    """Represent Risk Form."""
+
     STATUS_CHOICES = ["concept", "active", "closed", "deleted", "happened"]
 
     def __init__(self, parent=None, on_submit=None) -> None:
         super().__init__(parent)
         self.on_submit = on_submit
         self._allow_deleted_status: bool = True
-
         self.ui = Ui_RiskForm()
         self.ui.setupUi(self)
-
         self.status = self.ui.status
         self.owner_user_id = self.ui.owner_user_id
-
         self.code = self.ui.code
         self.title = self.ui.title
         self.category = self.ui.category
@@ -229,7 +211,6 @@ class RiskForm(QWidget):
         self.occurred_at = self.ui.occurred_at
         self.status_changed_at = self.ui.status_changed_at
         self.btn = self.ui.btn
-
         for w in (
             self.impact_cost,
             self.impact_time,
@@ -237,55 +218,69 @@ class RiskForm(QWidget):
             self.impact_quality,
         ):
             w.valueChanged.connect(self._recompute_overall_impact)
-
         self.btn.clicked.connect(self._submit)
-       
-        
-        # --- CONTEXT HELP (EDITOR FORM) ---
+
         self.code.setToolTip("Code: A unique identifier or short reference")
         self.title.setToolTip("Title: The name or brief summary")
         self.category.setToolTip("Category: The classification or grouping")
         self.status.setToolTip("Status: The current lifecycle state")
         self.owner_user_id.setToolTip("Owner: The team member assigned to manage this")
         self.description.setToolTip("Description: A detailed explanation of this item")
-        
         self.p.setToolTip("Probability: The likelihood of this occurring (1-5)")
         self.impact_cost.setToolTip("Cost Impact: Severity of financial impact (1-5)")
-        self.impact_time.setToolTip("Time Impact: Severity of schedule delay or acceleration (1-5)")
-        self.impact_scope.setToolTip("Scope Impact: Effect on project deliverables (1-5)")
-        self.impact_quality.setToolTip("Quality Impact: Effect on product standards (1-5)")
-        self.i.setToolTip("Overall Impact: Automatically calculated as the maximum of Cost, Time, Scope, and Quality")
-        
-        self.threat.setToolTip("Threat / Root Cause: What is the driving factor behind this?")
-        self.triggers.setToolTip("Triggers: What events or warning signs indicate this is actively happening?")
-        self.mitigation_plan.setToolTip("Action Plan: What are the steps to mitigate this risk or exploit this opportunity?")
-        self.document_url.setToolTip("A link to external documentation, a Jira ticket, or evidence")
-        
+        self.impact_time.setToolTip(
+            "Time Impact: Severity of schedule delay or acceleration (1-5)"
+        )
+        self.impact_scope.setToolTip(
+            "Scope Impact: Effect on project deliverables (1-5)"
+        )
+        self.impact_quality.setToolTip(
+            "Quality Impact: Effect on product standards (1-5)"
+        )
+        self.i.setToolTip(
+            "Overall Impact: Automatically calculated as the maximum of Cost, Time, Scope, and Quality"
+        )
+        self.threat.setToolTip(
+            "Threat / Root Cause: What is the driving factor behind this?"
+        )
+        self.triggers.setToolTip(
+            "Triggers: What events or warning signs indicate this is actively happening?"
+        )
+        self.mitigation_plan.setToolTip(
+            "Action Plan: What are the steps to mitigate this risk or exploit this opportunity?"
+        )
+        self.document_url.setToolTip(
+            "A link to external documentation, a Jira ticket, or evidence"
+        )
         self.identified_at.setToolTip("Identified At: When this was first discovered")
-        self.response_at.setToolTip("Response At: When mitigation or exploitation began")
-        self.occurred_at.setToolTip("Occurred At: When the risk/opportunity actually happened")
-        self.status_changed_at.setToolTip("Status Changed At: Auto-recorded when the status is updated")
-        # ----------------------------------
-
-        # --- AUTO-UPDATE STATUS DATE ---
+        self.response_at.setToolTip(
+            "Response At: When mitigation or exploitation began"
+        )
+        self.occurred_at.setToolTip(
+            "Occurred At: When the risk/opportunity actually happened"
+        )
+        self.status_changed_at.setToolTip(
+            "Status Changed At: Auto-recorded when the status is updated"
+        )
         self.status_changed_at.setEnabled(False)  # Aggressively lock the widget
         self.status.currentTextChanged.connect(self._on_status_changed)
-        # -------------------------------
 
     def track_dirty_state(self, callback) -> None:
         """Connect all input fields to a callback so the app knows when the form has unsaved changes."""
         for w in (self.code, self.title, self.category, self.document_url):
             w.textChanged.connect(lambda *_: callback())
-            
         for w in (self.description, self.threat, self.triggers, self.mitigation_plan):
             w.textChanged.connect(callback)
-            
-        for w in (self.p, self.impact_cost, self.impact_time, self.impact_scope, self.impact_quality):
+        for w in (
+            self.p,
+            self.impact_cost,
+            self.impact_time,
+            self.impact_scope,
+            self.impact_quality,
+        ):
             w.valueChanged.connect(lambda *_: callback())
-            
         self.status.currentTextChanged.connect(lambda *_: callback())
         self.owner_user_id.currentTextChanged.connect(lambda *_: callback())
-        
         for w in (self.identified_at, self.response_at, self.occurred_at):
             if hasattr(w, "dateTimeChanged"):
                 w.dateTimeChanged.connect(lambda *_: callback())
@@ -298,39 +293,35 @@ class RiskForm(QWidget):
         Server-side authorization is the real gate; this is UX-level protection
         to reduce accidental "soft delete" attempts by non-managers.
         """
-
         allowed = bool(allowed)
         if getattr(self, "_allow_deleted_status", True) == allowed:
             return
         self._allow_deleted_status = allowed
-
         current = (self.status.currentText() or "").strip()
         base = ["concept", "active", "closed", "happened"]
         choices = base + (["deleted"] if allowed else [])
-
         self.status.blockSignals(True)
         self.status.clear()
         self.status.addItems(choices)
-        # Keep it editable for power users, but remove the easy footgun.
         self.status.setEditable(True)
-
         if current:
             idx = self.status.findText(current)
             if idx >= 0:
                 self.status.setCurrentIndex(idx)
             else:
                 self.status.setEditText(current)
-
         self.status.blockSignals(False)
 
     def _set_date(self, widget, dt_str: str | None) -> None:
         """Helper to safely write to a QDateTimeEdit."""
         if hasattr(widget, "setDateTime"):
-            widget.setSpecialValueText("Not set") # Shows this when empty!
+            widget.setSpecialValueText("Not set")  # Shows this when empty!
             if dt_str:
                 widget.setDateTime(QDateTime.fromString(dt_str[:19], Qt.ISODate))
             else:
-                widget.setDateTime(widget.minimumDateTime()) # Forces "Not set" to display
+                widget.setDateTime(
+                    widget.minimumDateTime()
+                )  # Forces "Not set" to display
         else:
             widget.setText(dt_str or "")
 
@@ -342,7 +333,6 @@ class RiskForm(QWidget):
         """
         # Save
         self.btn.setEnabled(bool(editable))
-
         # Line edits
         for w in (
             self.code,
@@ -352,18 +342,15 @@ class RiskForm(QWidget):
             self.identified_at,
             self.response_at,
             self.occurred_at,
-            #self.status_changed_at,
+            # self.status_changed_at,
         ):
             w.setReadOnly(not editable)
-
         # Rich text
         for w in (self.description, self.threat, self.triggers, self.mitigation_plan):
             w.setReadOnly(not editable)
-
         # Combos
         self.status.setEnabled(bool(editable))
         self.owner_user_id.setEnabled(bool(editable))
-
         # Spinboxes (impact is derived/read-only already)
         self.p.setEnabled(bool(editable))
         for w in (
@@ -398,7 +385,6 @@ class RiskForm(QWidget):
                 continue
             label = f"{email or uid} ({role or 'member'})"
             self.owner_user_id.addItem(label, str(uid))
-
         self._set_owner_value(current)
         self.owner_user_id.blockSignals(False)
 
@@ -443,8 +429,9 @@ class RiskForm(QWidget):
             self.status_changed_at.setDateTime(QDateTime.currentDateTime())
         else:
             from datetime import datetime
+
             self.status_changed_at.setText(datetime.now().strftime("%Y-%m-%dT%H:%M:%S"))
-            
+
     def _read_date(self, widget) -> str | None:
         """Helper to safely read from a QDateTimeEdit to prevent sending 'Not set' to DB."""
         if hasattr(widget, "dateTime"):
@@ -453,9 +440,9 @@ class RiskForm(QWidget):
             return widget.dateTime().toString(Qt.ISODate)
         return widget.text().strip() or None
 
-
     def get_payload(self) -> dict:
         # no validation here (caller decides)
+        """Return payload."""
         self._recompute_overall_impact()
         return {
             "code": (self.code.text().strip() or None),
@@ -505,6 +492,7 @@ class RiskForm(QWidget):
         occurred_at: str | None = None,
     ) -> None:
         # Block signals during programmatic set
+        """Set values."""
         widgets = [
             self.code,
             self.title,
@@ -522,12 +510,10 @@ class RiskForm(QWidget):
         self.p.blockSignals(True)
         self.i.blockSignals(True)
         self.status.blockSignals(True)
-
         self.code.setText(code or "")
         self.title.setText(title or "")
         self.category.setText(category or "")
         self._set_owner_value(owner_user_id)
-
         # status combo
         st = (status or "concept").strip() or "concept"
         idx = self.status.findText(st)
@@ -535,7 +521,6 @@ class RiskForm(QWidget):
             self.status.setCurrentIndex(idx)
         else:
             self.status.setEditText(st)
-
         self.p.setValue(int(probability))
         self.impact_cost.setValue(
             int(impact_cost) if impact_cost is not None else int(impact)
@@ -550,13 +535,11 @@ class RiskForm(QWidget):
             int(impact_quality) if impact_quality is not None else int(impact)
         )
         self._recompute_overall_impact()
-
         self.description.setPlainText(description or "")
         self.threat.setPlainText(threat or "")
         self.triggers.setPlainText(triggers or "")
         self.mitigation_plan.setPlainText(mitigation_plan or "")
         self.document_url.setText(document_url or "")
-
         self._set_date(self.identified_at, identified_at)
         self._set_date(self.status_changed_at, status_changed_at)
         self._set_date(self.response_at, response_at)
@@ -578,17 +561,18 @@ class RiskForm(QWidget):
 
 
 class CrispHeader(QHeaderView):
+    """Represent Crisp Header."""
+
     def __init__(self, orientation, parent=None) -> None:
         super().__init__(orientation, parent)
 
     def paintSection(self, painter, rect, logicalIndex) -> None:
+        """Paint Section."""
         super().paintSection(painter, rect, logicalIndex)
-
         grid_color = QColor(self.palette().text().color())
         grid_color.setAlpha(50)
         pen = QPen(grid_color, 1)
         pen.setCosmetic(True)
-
         painter.save()
         painter.setPen(pen)
         if logicalIndex < self.count() - 1:

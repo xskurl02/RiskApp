@@ -15,18 +15,26 @@ class SyncService:
     def __init__(
         self, store: LocalStore, outbox: OutboxStore, remote: Any | None
     ) -> None:
+        """Internal helper for init."""
         self._store = store
         self._outbox = outbox
         self._remote = remote
 
     def can_sync(self) -> bool:
+        """Return whether sync is allowed."""
         return self._remote is not None
 
     def pending_count(self, project_id: str | None = None) -> int:
+        """Handle pending count."""
         return self._outbox.pending_count(project_id)
 
     def blocked_count(self, project_id: str | None = None) -> int:
+        """Handle blocked count."""
         return self._outbox.blocked_count(project_id)
+
+    def blocked_details(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        """Handle blocked details."""
+        return self._outbox.get_blocked_changes(project_id)
 
     def _json_snippet(self, obj: object, *, limit: int = 500) -> str:
         """Best-effort short JSON payload for storing in `outbox.last_error`."""
@@ -46,6 +54,7 @@ class SyncService:
     def _push_once(
         self, project_id: str, changes: list[dict[str, Any]]
     ) -> dict[str, Any]:
+        """Internal helper for push once."""
         if not self._remote:
             raise RuntimeError(
                 "No server configured (start the app online at least once)."
@@ -110,6 +119,7 @@ class SyncService:
         return new_ids
 
     def sync_project(self, project_id: str) -> dict[str, Any]:
+        """Synchronize project."""
         if not self._remote:
             raise RuntimeError(
                 "No server configured (start the app online at least once)."
@@ -121,6 +131,8 @@ class SyncService:
             "pushed": 0,
             "conflicts": 0,
             "errors": 0,
+            "blocked": 0,
+            "blocked_details": [],
             "pulled_risks": 0,
             "pulled_opportunities": 0,
             "pulled_actions": 0,
@@ -188,6 +200,8 @@ class SyncService:
             summary[f"pulled_{key}"] = len(items)
 
         self._store.set_last_server_time(effective_project_id, server_time)
+        summary["blocked_details"] = self.blocked_details(effective_project_id)
+        summary["blocked"] = len(summary["blocked_details"])
         return summary
 
     def _promote_local_project(self, local_project_id: str) -> str | None:
@@ -219,7 +233,9 @@ class SyncService:
                 created = only
 
         if created is None and hasattr(self._remote, "create_project"):
-            created = self._remote.create_project(name=p.name, description=p.description)
+            created = self._remote.create_project(
+                name=p.name, description=p.description
+            )
 
         if created is None and projects:
             created = projects[0]
@@ -228,7 +244,9 @@ class SyncService:
         if not new_id:
             return None
 
-        self._store.migrate_project_id(old_project_id=local_project_id, new_project_id=str(new_id))
+        self._store.migrate_project_id(
+            old_project_id=local_project_id, new_project_id=str(new_id)
+        )
         return str(new_id)
 
     def _pull_paginated(self, project_id: str, since: str) -> dict[str, Any]:

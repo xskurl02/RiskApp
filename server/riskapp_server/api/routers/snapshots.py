@@ -1,3 +1,5 @@
+"""API router for snapshots."""
+
 from __future__ import annotations
 
 import uuid
@@ -22,6 +24,7 @@ router = APIRouter(tags=["snapshots"])
 
 
 def _top_item(r: ScoreSnapshot) -> TopItem:
+    """Internal helper for top item."""
     return TopItem(
         item_id=r.item_id,
         title=r.title,
@@ -42,6 +45,7 @@ def create_snapshot(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> SnapshotCreateOut:
+    """Create snapshot."""
     require_min_role(db, project_id, user.id, min_role=Role.member)
 
     batch_id = uuid.uuid4()
@@ -52,6 +56,7 @@ def create_snapshot(
     chunk_size = max(100, int(SNAPSHOT_INSERT_CHUNK or 1000))
 
     def flush_chunk() -> None:
+        """Handle flush chunk."""
         nonlocal chunk
         if chunk:
             db.execute(insert(ScoreSnapshot), chunk)
@@ -66,7 +71,9 @@ def create_snapshot(
     elif k in {"opportunity", "opportunities", "opp", "opps"}:
         wanted = ["opportunity"]
     else:
-        raise HTTPException(status_code=400, detail="kind must be both|risks|opportunities")
+        raise HTTPException(
+            status_code=400, detail="kind must be both|risks|opportunities"
+        )
 
     for kind in wanted:
         rows = db.execute(
@@ -114,6 +121,7 @@ def latest_snapshot(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> SnapshotLatestOut:
+    """Handle latest snapshot."""
     ensure_member(db, project_id, user.id)
     k = (kind or "").strip().lower()
     snap_kind = (
@@ -158,6 +166,7 @@ def top_items(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> TopBatch:
+    """Handle top items."""
     ensure_member(db, project_id, user.id)
     limit = max(1, min(limit, 100))
 
@@ -197,6 +206,7 @@ def top_history(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[TopBatch]:
+    """Handle top history."""
     ensure_member(db, project_id, user.id)
     limit = max(1, min(limit, 100))
 

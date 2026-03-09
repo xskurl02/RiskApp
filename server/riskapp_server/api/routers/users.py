@@ -1,3 +1,5 @@
+"""API router for users."""
+
 from __future__ import annotations
 
 import secrets
@@ -33,11 +35,13 @@ router = APIRouter(tags=["users"])
 
 
 def _require_superuser(user: User) -> None:
+    """Internal helper for require superuser."""
     if not getattr(user, "is_superuser", False):
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
 
 def _apply_new_password(db: Session, user: User, new_password: str) -> None:
+    """Internal helper for apply new password."""
     issues = validate_password(new_password)
     if issues:
         raise HTTPException(status_code=400, detail={"password": issues})
@@ -49,6 +53,7 @@ def _apply_new_password(db: Session, user: User, new_password: str) -> None:
 
 @router.get("/users/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)) -> User:
+    """Handle me."""
     return user
 
 
@@ -58,6 +63,7 @@ def change_password(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """Handle change password."""
     if not verify_pw(payload.old_password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid current password")
     _apply_new_password(db, user, payload.new_password)
@@ -71,6 +77,7 @@ def request_password_reset(
     db: Session = Depends(get_db),
 ):
     # Enumeration-safe: response does not reveal whether the account exists.
+    """Handle request password reset."""
     email = str(payload.email).lower()
     user = db.execute(select(User).where(User.email == email)).scalars().first()
 
@@ -99,6 +106,7 @@ def request_password_reset(
 def confirm_password_reset(
     payload: PasswordResetConfirmIn, db: Session = Depends(get_db)
 ):
+    """Handle confirm password reset."""
     now = utcnow()
     token_hash = hash_bearer_secret(payload.token)
     pr: PasswordResetToken | None = (
@@ -126,6 +134,7 @@ def admin_deactivate_user(
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
 ):
+    """Handle admin deactivate user."""
     _require_superuser(actor)
     target = db.get(User, user_id)
     if not target:
@@ -144,6 +153,7 @@ def admin_activate_user(
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
 ):
+    """Handle admin activate user."""
     _require_superuser(actor)
     target = db.get(User, user_id)
     if not target:
@@ -162,6 +172,7 @@ def admin_set_password(
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
 ):
+    """Handle admin set password."""
     _require_superuser(actor)
     target = db.get(User, user_id)
     if not target:

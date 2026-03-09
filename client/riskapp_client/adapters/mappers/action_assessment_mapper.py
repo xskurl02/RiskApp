@@ -15,6 +15,7 @@ from riskapp_client.domain.scored_entity_fields import ACTION_DEFAULT_STATUS
 
 
 def _req_str(data: Mapping[str, Any], key: str) -> str:
+    """Internal helper for req str."""
     v = data.get(key)
     s = str(v).strip() if v is not None else ""
     if not s:
@@ -25,6 +26,7 @@ def _req_str(data: Mapping[str, Any], key: str) -> str:
 def _opt_str(
     data: Mapping[str, Any], key: str, default: str | None = None
 ) -> str | None:
+    """Internal helper for opt str."""
     v = data.get(key)
     if v is None:
         return default
@@ -35,6 +37,7 @@ def _opt_str(
 def _opt_int(
     data: Mapping[str, Any], key: str, default: int | None = None
 ) -> int | None:
+    """Internal helper for opt int."""
     v = data.get(key)
     if v is None:
         return default
@@ -51,7 +54,6 @@ def _opt_int(
 
 def action_from_mapping(data: Mapping[str, Any]) -> Action:
     """Create an Action from an API/SQLite mapping."""
-
     data = dict(data)
     return Action(
         id=_req_str(data, "id"),
@@ -71,9 +73,7 @@ def action_from_mapping(data: Mapping[str, Any]) -> Action:
 
 def assessment_from_mapping(data: Mapping[str, Any]) -> Assessment:
     """Create an Assessment from an API/SQLite mapping."""
-
     data = dict(data)
-
     # Server endpoints can expose assessments in a few shapes:
     # - /risks/{id}/assessments uses the legacy field name `risk_id`.
     # - /opportunities/{id}/assessments uses `opportunity_id`.
@@ -86,7 +86,6 @@ def assessment_from_mapping(data: Mapping[str, Any]) -> Assessment:
     )
     if not item_id:
         raise KeyError("Missing required field: item_id")
-
     return Assessment(
         id=_req_str(data, "id"),
         item_id=item_id,

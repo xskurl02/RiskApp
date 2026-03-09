@@ -1,3 +1,5 @@
+"""API router for projects."""
+
 from __future__ import annotations
 
 import uuid
@@ -32,6 +34,7 @@ router = APIRouter(tags=["projects"])
 
 
 def _ensure_not_last_admin(db: Session, project_id: uuid.UUID) -> None:
+    """Internal helper for ensure not last admin."""
     n = db.execute(
         select(func.count()).where(
             ProjectMember.project_id == project_id,
@@ -51,6 +54,7 @@ def create_project(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Project:
+    """Create project."""
     now = utcnow()
     project = Project(
         id=uuid.uuid4(),
@@ -75,6 +79,7 @@ def create_project(
 def list_projects(
     db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ) -> list[Project]:
+    """Return projects."""
     return (
         db.execute(
             select(Project)
@@ -93,6 +98,7 @@ def get_project(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Project:
+    """Return project."""
     ensure_member(db, project_id, user.id)
     proj = db.execute(select(Project).where(Project.id == project_id)).scalars().first()
     if not proj:
@@ -107,6 +113,7 @@ def add_member(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
+    """Add member."""
     require_min_role(db, project_id, user.id, min_role=Role.admin)
 
     target_email = str(payload.user_email).lower()
@@ -152,6 +159,7 @@ def list_members(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[MemberOut]:
+    """Return members."""
     ensure_member(db, project_id, user.id)
     rows = db.execute(
         select(ProjectMember, User)
@@ -181,6 +189,7 @@ def remove_member(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
+    """Remove member."""
     require_min_role(db, project_id, user.id, min_role=Role.admin)
     m = (
         db.execute(

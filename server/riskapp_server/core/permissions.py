@@ -19,6 +19,7 @@ ROLE_RANK: dict[str, int] = {
 
 
 def ensure_role_at_least(role: str | Role, min_role: str | Role) -> None:
+    """Ensure role at least."""
     r = role.value if isinstance(role, Role) else role
     m = min_role.value if isinstance(min_role, Role) else min_role
     if ROLE_RANK.get(r, 0) < ROLE_RANK.get(m, 10_000):
@@ -28,7 +29,10 @@ def ensure_role_at_least(role: str | Role, min_role: str | Role) -> None:
 def get_member_role(
     db: Session, project_id: uuid.UUID, user_id: uuid.UUID
 ) -> str | None:
+    """Return member role."""
+
     def _normalize_role(val) -> str | None:
+        """Internal helper for normalize role."""
         if val is None:
             return None
         if isinstance(val, Role):
@@ -61,6 +65,7 @@ def require_min_role(
     *,
     min_role: Role | str,
 ) -> str:
+    """Handle require min role."""
     role = get_member_role(db, project_id, user_id)
     if not role or role not in ROLE_RANK:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -69,4 +74,5 @@ def require_min_role(
 
 
 def ensure_member(db: Session, project_id: uuid.UUID, user_id: uuid.UUID) -> str:
+    """Ensure member."""
     return require_min_role(db, project_id, user_id, min_role=Role.viewer)

@@ -1,3 +1,5 @@
+"""API router for crud factory."""
+
 import csv
 import io
 import uuid
@@ -34,6 +36,7 @@ def create_crud_router(
     AssessmentModel=None,
     AssessmentOutSchema=None,
 ) -> APIRouter:
+    """Create crud router."""
     r = APIRouter(tags=tags)
 
     @r.post(
@@ -46,6 +49,7 @@ def create_crud_router(
         user: User = Depends(get_current_user),
     ):
         # Keep role checks consistent across the codebase (avoid string roles).
+        """Create obj."""
         require_min_role(db, project_id, user.id, min_role=Role.member)
         return create_item(db, user.id, project_id, payload, Model)
 
@@ -56,6 +60,7 @@ def create_crud_router(
         db: Session = Depends(get_db),
         user: User = Depends(get_current_user),
     ):
+        """Return objs."""
         ensure_member(db, project_id, user.id)
         f = vars(filters)
         if fixed_type:
@@ -129,6 +134,7 @@ def create_crud_router(
         cols = [c for c in cols if c]
 
         def rows():
+            """Handle rows."""
             buf = io.StringIO()
             w = csv.writer(buf)
             w.writerow(cols)
@@ -154,6 +160,7 @@ def create_crud_router(
         user: User = Depends(get_current_user),
     ):
         # Editing is allowed for members; *deletion* is manager-only.
+        """Update obj."""
         status_val = getattr(payload, "status", None)
         status_s = str(getattr(status_val, "value", status_val) or "").lower().strip()
         min_role = Role.manager if status_s == RiskStatus.deleted.value else Role.member
@@ -173,6 +180,7 @@ def create_crud_router(
         db: Session = Depends(get_db),
         user: User = Depends(get_current_user),
     ) -> Response:
+        """Delete obj."""
         require_min_role(db, project_id, user.id, min_role=Role.manager)
         delete_item(db, project_id, item_id, Model, item_type=fixed_type)
         return Response(status_code=204)
@@ -184,6 +192,7 @@ def create_crud_router(
         db: Session = Depends(get_db),
         user: User = Depends(get_current_user),
     ):
+        """Handle obj report."""
         ensure_member(db, project_id, user.id)
         f = vars(filters)
         if fixed_type:
@@ -203,6 +212,7 @@ def create_crud_router(
             db: Session = Depends(get_db),
             user: User = Depends(get_current_user),
         ):
+            """Return assessments."""
             ensure_member(db, project_id, user.id)
             if not db.execute(
                 select(Model.id).where(
@@ -241,6 +251,7 @@ def create_crud_router(
             db: Session = Depends(get_db),
             user: User = Depends(get_current_user),
         ):
+            """Insert or update my assessment."""
             require_min_role(db, project_id, user.id, min_role=Role.member)
             if not db.execute(
                 select(Model.id).where(
